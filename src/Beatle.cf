@@ -1,0 +1,109 @@
+comment "#" ;
+layout "with" ; -- for pattern matching
+
+token TIdent (upper (letter | digit)*) ;         -- algebraic data type ident
+token TPolyIdent ('\'' (lower)+ ) ;              -- polymorphic type ident
+token VIdent (lower (letter | digit | '_')*) ;   -- value ident
+
+entrypoints Program ;
+Prog.       Program ::= [Phrase] ;
+Value.      Phrase  ::= LetDef ;                 -- value-definition
+Expression. Phrase  ::= Expr ;                   -- expression
+TypeDecl.   Phrase  ::= TypeDef ;                -- type-definition
+
+terminator Phrase ";;" ;
+
+Let.        LetDef   ::= "let" [LetBind] ;
+LetRec.     LetDef   ::= "letrec" [LetBind] ;
+ConstBind.  LetBind  ::= Pattern "=" Expr ;
+ProcBind.   LetBind  ::= ProcName [Pattern] RType "=" Expr ;
+separator nonempty Pattern "" ;
+separator nonempty LetBind "also" ;
+
+PId.        Pattern5 ::= VIdent ;
+PInt.       Pattern5 ::= Integer ;
+PTrue.      Pattern5 ::= "True" ;
+PFalse.     Pattern5 ::= "False" ;
+PWildcard.  Pattern5 ::= "_" ;
+PListEmpty. Pattern5 ::= "[]" ;
+PTypeAlg.   Pattern5 ::= TIdent ;
+PTyped.     Pattern5 ::= "(" Pattern ":" Type ")" ;
+PList.      Pattern4 ::= "[" [Pattern4] "]" ;
+PTypeAlgRec.Pattern3 ::= "(" TIdent PNested ")";
+PNamedPat.  Pattern2 ::= VIdent "@" Pattern4 ; 
+PListCons.  Pattern1 ::= Pattern5 "::" Pattern1 ;
+
+PAlgWild.   PNested  ::= "_" ;
+PAlgList.   PNested  ::= "(" [Pattern1] ")" ;
+
+CPattern.   CasePat  ::= Pattern4 ;
+CTypeAlgRec.CasePat  ::= TIdent PNested;
+CNamedPat.  CasePat  ::= VIdent "@" Pattern4 ;
+CListCons.  CasePat  ::= Pattern5 "::" Pattern1 ;
+
+separator nonempty Pattern4 "," ;
+separator Pattern1 "," ;
+coercions Pattern 5 ;
+
+-- Expressions --
+EId.        Expr9    ::= VIdent ;
+EInt.       Expr9    ::= Integer ;
+ETrue.      Expr9    ::= "True" ;
+EFalse.     Expr9    ::= "False" ;
+EListEmpty. Expr9    ::= "[]" ;
+ETypeAlg.   Expr9    ::= TIdent ;
+
+EApp.       Expr8    ::= Expr8 Expr9 ;
+ETyped.     Expr7    ::= "(" Expr ":" Type ")" ;
+
+ENeg.       Expr6    ::= "-" Expr7 ;
+ENot.       Expr6    ::= "not" Expr7 ;
+EMul.       Expr5    ::= Expr5 "*" Expr6 ;
+EDiv.       Expr5    ::= Expr5 "/" Expr6 ;
+EMod.       Expr5    ::= Expr5 "%" Expr6 ;
+EAdd.       Expr4    ::= Expr4 "+" Expr5 ;
+ESub.       Expr4    ::= Expr4 "-" Expr5 ;
+
+EListCons.  Expr3    ::= Expr4 "::" Expr3 ;
+
+ELTH.       Expr2    ::= Expr2 "<" Expr3 ;
+ELE.        Expr2    ::= Expr2 "<=" Expr3 ;
+EGTH.       Expr2    ::= Expr2 ">" Expr3 ;
+EGE.        Expr2    ::= Expr2 ">=" Expr3 ;
+EEQU.       Expr2    ::= Expr2 "==" Expr3 ;
+ENE.        Expr2    ::= Expr2 "!=" Expr3 ;
+EAnd.       Expr1    ::= Expr2 "and" Expr1 ;
+EOr.        Expr     ::= Expr1 "or" Expr ;
+
+ECond.      Expr     ::= "if" Expr "then" Expr "else" Expr ;
+ELetIn.     Expr     ::= LetDef "in" Expr ; 
+EMatch.     Expr     ::= "match" VIdent "with" "{" [Matching] "}" ;
+ELambda.    Expr     ::= "\\" [VIdent] "->" Expr ;
+
+EList.      Expr     ::= "[" [Expr] "]" ;
+ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
+
+separator nonempty Expr "," ;
+separator nonempty Matching ";" ;
+separator nonempty VIdent "," ;
+coercions Expr 9 ;
+
+MatchCase.  Matching ::= "case" CasePat "->" Expr ;
+
+ProcNameId. ProcName ::= VIdent ;
+
+TDef.       TypeDef  ::= "type" TIdent [TPolyIdent] "=" [TypeCons] ;
+TCons.      TypeCons ::= TIdent [Type] ;
+separator TPolyIdent "" ;
+separator nonempty TypeCons "|" ;
+separator Type "" ;
+
+TInt.       Type1    ::= "Int" ;
+TBool.      Type1    ::= "Bool" ;
+TAlgebraic. Type1    ::= TIdent ;
+TPoly.      Type1    ::= TPolyIdent ;
+TFun.       Type     ::= Type1 "->" Type ;
+coercions Type 1 ;
+
+NoRetType.  RType    ::= ;
+RetType.    RType    ::= "->" Type ;
