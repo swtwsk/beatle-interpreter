@@ -47,7 +47,8 @@ extra-deps:
 - random-1.1
 - syb-0.7
 - intero-0.1.39
-
+- haskeline-0.7.4.3
+- stm-2.5.0.0
 # Override default flag values for local packages and extra-deps
 # flags: {}
 

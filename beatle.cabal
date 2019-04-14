@@ -27,7 +27,7 @@ library
       LexBeatle
       ParBeatle
       PrintBeatle
-      SkelBeatle
+      Interpreter
   other-modules:
       Paths_beatle
   hs-source-dirs:
@@ -50,6 +50,7 @@ executable beatle-exe
   build-depends:
       base >=4.7 && <5
     , beatle
+    , haskeline
   build-tools:
       alex
     , happy
