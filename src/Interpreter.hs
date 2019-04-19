@@ -11,7 +11,8 @@ import qualified Lambda.Lambda as L
 type OldResult = Err String
 type Value = L.Value
 
-type Result = Either String Value
+type TransRes = Either String
+type Result = TransRes Value
 
 interpretProg :: Program -> [Result]
 interpretProg (Prog phr) = map interpretPhrase phr
@@ -19,7 +20,7 @@ interpretProg (Prog phr) = map interpretPhrase phr
 interpretPhrase :: Phrase -> Result
 interpretPhrase (Expression e) = either Left EL.eval . translateExpr $ e
 
-translateExpr :: Expr -> Either String EL.Expr
+translateExpr :: Expr -> TransRes EL.Expr
 translateExpr (EId (VIdent n)) = pure $ EL.Var n
 translateExpr (EInt i) = pure . EL.Lit $ L.LInt i
 translateExpr ETrue = pure . EL.Lit $ L.LBool True
@@ -64,7 +65,11 @@ translateExpr (EListCons e1 e2) = Left "unimplemented"
 -- | EAnd Expr Expr
 -- | EOr Expr Expr
 -- | ECond Expr Expr Expr
-translateExpr (ELetIn letdef e) = Left "unimplemented"
+translateExpr (ELetIn letdef e) = do
+    tl <- translateLetDef letdef
+    let (name, letbind) = tl
+    te <- translateExpr e
+    pure $ EL.Let name letbind te 
 -- | EMatch VIdent [Matching]
 translateExpr (ELambda vlist e) = do
     te <- translateExpr e
@@ -75,6 +80,24 @@ translateExpr (ELambda vlist e) = do
             [] -> e
 translateExpr (EList elist) = Left "unimplemented"
 translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
+
+translateLetDef :: LetDef -> TransRes (String, EL.Expr)
+translateLetDef ld = case ld of
+    Let letbinds -> head $ map translateLetBind letbinds
+    LetRec letbinds -> Left "unimplemented"
+
+translateLetBind :: LetBind -> TransRes (String, EL.Expr)
+translateLetBind (ConstBind p e) = do
+    tp <- translatePattern p
+    te <- translateExpr e
+    pure (tp, te)
+translateLetBind (ProcBind procname patterns rtype expr) =
+    Left "unimplemented"
+
+-- TODO: This is totally not how it should be
+translatePattern :: Pattern -> TransRes String
+translatePattern (PId (VIdent n)) = pure n
+translatePattern _ = Left "unimplemented"
 
 failure :: Show a => a -> OldResult
 failure x = Bad $ "Undefined case: " ++ show x
