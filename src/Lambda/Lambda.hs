@@ -11,6 +11,7 @@ data Expr = Var Name
           | Lam Name Expr
           | Lit Lit
           | App Expr Expr
+          | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
           deriving (Show)
@@ -19,7 +20,7 @@ data Lit = LInt Int
          | LBool Bool
          deriving (Show)
 
-data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr
+data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
     deriving (Show)
 data UnOp = OpNeg
     deriving (Show)
@@ -55,6 +56,12 @@ eval' (App e1 e2) = do
             runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
         apply _ _ = throwError "First expression is not a function; it cannot be applied"
 
+eval' (If cond e1 e2) = do
+    c <- eval' cond
+    case c of
+        VBool b -> if b then eval' e1 else eval' e2
+        _ -> throwError boolTypeError
+
 eval' (BinOp op e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
@@ -71,7 +78,10 @@ eval' (BinOp op e1 e2) = do
         binOp _ _ OpSub = throwError intTypeError
         binOp _ _ OpDiv = throwError intTypeError
         binOp (VBool a) (VBool b) OpAnd = return . VBool $ a && b
-        binOp  (VBool a) (VBool b) OpOr = return . VBool $ a || b
+        binOp (VBool a) (VBool b) OpOr  = return . VBool $ a || b
+        binOp (VBool a) (VBool b) OpEq  = return . VBool $ a == b
+        binOp (VInt a) (VInt b) OpEq    = return . VBool $ a == b
+        binOp (VInt a) (VInt b) OpLT    = return . VBool $ a < b
         binOp _ _ OpAnd = throwError boolTypeError
         binOp _ _ OpOr  = throwError boolTypeError
 
@@ -104,3 +114,25 @@ not' = Lam "x" (UnOp OpNeg (Var "x"))
 
 example2 :: Expr
 example2 = App (Lam "t" (App (App (Var "t") (not')) (Lit $ LBool True))) twice
+
+yComb :: Expr
+yComb = Lam "h" (App (Lam "x" (App (Var "h") (App (Var "x") (Var "x")))) (Lam "x" (App (Var "h") (App (Var "x") (Var "x")))))
+
+zComb :: Expr
+zComb = Lam "f" (App (Lam "x" (App (Var "f") (Lam "v" (App (App (Var "x") (Var "x")) (Var "v"))))) (Lam "x" (App (Var "f") (Lam "v" (App (App (Var "x") (Var "x")) (Var "v"))))))
+
+sComb :: Expr
+sComb = Lam "f" (Lam "g" (Lam "x" (App (App (Var "f") (Var "x")) (App (Var "g") (Var "x")))))
+
+kComb :: Expr
+kComb = Lam "x" (Lam "y" (Var "x"))
+
+iComb :: Expr
+iComb = Lam "x" (Var "x")
+
+hFac :: Expr
+hFac = Lam "fac" (Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (BinOp OpMul (Var "n") (App (Var "fac") (BinOp OpSub (Var "n") (Lit $ LInt 1))))))
+
+omega :: Expr
+omega = App (Lam "x" (App (Var "x") (Var "x")))
+            (Lam "x" (App (Var "x") (Var "x")))
