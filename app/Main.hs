@@ -12,12 +12,18 @@ import ErrM
 import Control.Monad.IO.Class
 import System.Console.Haskeline
 
+import qualified Lambda.Lambda as L
+
+eitherFunc :: Either String L.Value -> String
+eitherFunc (Left err) = err
+eitherFunc (Right val) = show val
+
 process :: String -> IO ()
 process line = do
   let res = pProgram (myLexer line)
   case res of
     (Bad s) -> print "err"
-    (Ok s) -> print (interpretProg s)
+    (Ok s) -> print $ map eitherFunc (interpretProg s)
 
 main :: IO ()
 main = runInputT defaultSettings loop
