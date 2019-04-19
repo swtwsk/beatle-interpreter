@@ -28,6 +28,8 @@ library
       ParBeatle
       PrintBeatle
       Interpreter
+      Lambda.Lambda
+      Lambda.EnrichedLambda
   other-modules:
       Paths_beatle
   hs-source-dirs:
@@ -35,6 +37,8 @@ library
   build-depends:
       base >=4.7 && <5
     , array
+    , mtl
+    , containers
   build-tools:
       alex >=3.2.4
     , happy >=1.19.9

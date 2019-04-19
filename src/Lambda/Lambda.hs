@@ -16,16 +16,16 @@ data Expr = Var Name
           | UnOp UnOp Expr
           deriving (Show)
 
-data Lit = LInt Int
+data Lit = LInt Integer
          | LBool Bool
          deriving (Show)
 
 data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
     deriving (Show)
-data UnOp = OpNeg
+data UnOp = OpNeg | OpNot
     deriving (Show)
 
-data Value = VInt Int | VBool Bool | VClos Expr ValMap
+data Value = VInt Integer | VBool Bool | VClos Expr ValMap
     deriving (Show)
 
 type ValMap = Map.Map Name Value
@@ -87,12 +87,13 @@ eval' (BinOp op e1 e2) = do
 
 eval' (UnOp op e) = do
     ev <- eval' e
-    either throwError return $ boolOp ev op
+    either throwError return $ unOp ev op
     where 
-        boolOp :: Value -> UnOp -> Either String Value
-        boolOp (VBool b) OpNeg = return . VBool $ not b
-        boolOp _ _ = throwError boolTypeError
-
+        unOp :: Value -> UnOp -> Either String Value
+        unOp (VInt v) OpNeg = return . VInt $ (-v)
+        unOp _ OpNeg = throwError intTypeError
+        unOp (VBool b) OpNot = return . VBool $ not b
+        unOp _ OpNot = throwError boolTypeError
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t
