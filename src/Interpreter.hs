@@ -56,15 +56,41 @@ translateExpr (ESub e1 e2) = do
     pure $ EL.BinOp L.OpSub te1 te2
 translateExpr (EMod e1 e2) = Left "unimplemented"
 translateExpr (EListCons e1 e2) = Left "unimplemented"
--- | ELTH Expr Expr
--- | ELE Expr Expr
--- | EGTH Expr Expr
--- | EGE Expr Expr
--- | EEQU Expr Expr
--- | ENE Expr Expr
--- | EAnd Expr Expr
--- | EOr Expr Expr
--- | ECond Expr Expr Expr
+translateExpr (ELTH e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.BinOp L.OpLT te1 te2
+translateExpr (ELE e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.BinOp L.OpOr (EL.BinOp L.OpLT te1 te2) (EL.BinOp L.OpEq te1 te2)
+translateExpr (EGTH e1 e2) = do
+    le <- translateExpr (ELE e1 e2)
+    pure $ EL.UnOp L.OpNot le
+translateExpr (EGE e1 e2) = do
+    less <- translateExpr (ELTH e1 e2)
+    pure $ EL.UnOp L.OpNot less
+translateExpr (EEQU e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.BinOp L.OpEq te1 te2
+translateExpr (ENE e1 e2) = do
+    eq <- translateExpr (EEQU e1 e2)
+    pure $ EL.UnOp L.OpNot eq
+translateExpr (EAnd e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.BinOp L.OpAnd te1 te2
+translateExpr (EOr e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.BinOp L.OpOr te1 te2
+translateExpr (ECond cond e1 e2) = do
+    tc <- translateExpr cond
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ EL.If tc te1 te2
+
 translateExpr (ELetIn letdef e) = do
     tl <- translateLetDef letdef
     let (name, letbind) = tl
