@@ -34,6 +34,9 @@ type Env = ReaderT ValMap (Except String) Value
 eval :: Expr -> Either String Value
 eval expr = runExcept (runReaderT (eval' expr) Map.empty)
 
+evalEnv :: ValMap -> Expr -> Either String Value
+evalEnv map expr = runExcept (runReaderT (eval' expr) map)
+
 eval' :: Expr -> Env
 eval' (Lit l) = case l of
     LInt i -> return (VInt i)

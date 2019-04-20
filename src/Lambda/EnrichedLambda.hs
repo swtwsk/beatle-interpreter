@@ -27,6 +27,9 @@ data Expr = Var Name
 eval :: Expr -> Either String Value
 eval = L.eval . translate
 
+evalEnv :: L.ValMap -> Expr -> Either String Value
+evalEnv vmap expr = L.evalEnv vmap (translate expr)
+
 translate :: Expr -> L.Expr
 translate (Var n) = L.Var n
 translate (Lam n e) = L.Lam n (translate e)

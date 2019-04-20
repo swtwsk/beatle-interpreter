@@ -1,5 +1,3 @@
-{-# LANGUAGE PackageImports #-}
-
 module Main where
 
 import LexBeatle
@@ -11,34 +9,40 @@ import Interpreter
 import ErrM
 
 import Control.Monad.IO.Class
+import Control.Monad.State
+import Data.Maybe
 import System.Console.Haskeline
+
+import qualified Data.Map as Map
 
 import qualified Lambda.Lambda as L
 
+-- type IState = StateT L.ValMap (InputT IO)
+
 myLLexer = resolveLayout True . myLexer
 
-eitherFunc :: Either String L.Value -> String
-eitherFunc (Left err) = err
-eitherFunc (Right val) = case val of
+eitherFunc :: Either String L.Value -> IState String
+eitherFunc (Left err) = return err
+eitherFunc (Right val) = return $ case val of
     L.VInt i -> show i
     L.VBool b -> show b
     L.VClos _ _ -> "<<function>>"
 
-process :: String -> IO ()
+process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
     case res of
-        (Bad s) -> print "err"
-        (Ok s) -> print . eitherFunc . interpretLine $ s
+        (Bad s) -> liftIO $ print "err"
+        (Ok s) -> (liftIO . print) =<< eitherFunc =<< interpretLine s
         -- (Ok s) -> print $ map eitherFunc (interpretLine s)
 
 main :: IO ()
-main = runInputT defaultSettings loop
+main = runInputT defaultSettings (runStateT loop Map.empty) >> return ()
     where
-        loop :: InputT IO ()
+        loop :: IState ()
         loop = do
-            minput <- getInputLine "λ "
+            minput <- lift $ getInputLine "λ "
             case minput of
                 Nothing -> return ()
-                Just ":q" -> outputStrLn "Goodbye."
-                Just input -> (liftIO $ process input) >> loop
+                Just ":q" -> lift $ outputStrLn "Goodbye."
+                Just input -> process input >> loop

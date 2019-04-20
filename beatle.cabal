@@ -37,6 +37,7 @@ library
   build-depends:
       base >=4.7 && <5
     , array
+    , haskeline
     , mtl
     , containers
   build-tools:
@@ -55,6 +56,8 @@ executable beatle-exe
       base >=4.7 && <5
     , beatle
     , haskeline
+    , mtl
+    , containers
   build-tools:
       alex
     , happy
