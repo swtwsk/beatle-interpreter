@@ -117,8 +117,16 @@ translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
     te <- translateExpr e
     pure (tp, te)
-translateLetBind (ProcBind procname patterns rtype expr) =
-    Left "unimplemented"
+-- TODO: read rt
+translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
+    let mappedpl = map translatePattern pl
+    tpl <- sequence mappedpl
+    te <- translateExpr e
+    pure (proc, transLambda tpl te)
+    where
+        transLambda l e = case l of
+            n:t  -> EL.Lam n (transLambda t e)
+            [] -> e
 
 -- TODO: This is totally not how it should be
 translatePattern :: Pattern -> TransRes String
