@@ -14,6 +14,7 @@ data Expr = Var Name
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
+          | Mapped Expr ValMap
           deriving (Show)
 
 data Lit = LInt Integer
@@ -97,6 +98,12 @@ eval' (UnOp op e) = do
         unOp _ OpNeg = throwError intTypeError
         unOp (VBool b) OpNot = return . VBool $ not b
         unOp _ OpNot = throwError boolTypeError
+
+eval' (Mapped e vmap) = do
+    env <- ask
+    either throwError return $ ev env
+    where
+        ev env = runExcept (runReaderT (eval' e) (Map.union vmap env))
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t
