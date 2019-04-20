@@ -72,7 +72,11 @@ translateExpr (ESub e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
     pure $ EL.BinOp L.OpSub te1 te2
-translateExpr (EMod e1 e2) = Left "unimplemented"
+translateExpr (EMod e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ 
+        EL.BinOp L.OpSub te1 (EL.BinOp L.OpMul te2 (EL.BinOp L.OpDiv te1 te2))
 translateExpr (EListCons e1 e2) = Left "unimplemented"
 translateExpr (ELTH e1 e2) = do
     te1 <- translateExpr e1
@@ -114,7 +118,8 @@ translateExpr (ELetIn letdef e) = do
     let (name, letbind) = tl
     te <- translateExpr e
     pure $ EL.Let name letbind te 
--- | EMatch VIdent [Matching]
+translateExpr (EMatch (VIdent n) matchList) =
+    Left "unimplemented"
 translateExpr (ELambda vlist e) = do
     te <- translateExpr e
     pure $ transLambda vlist te
