@@ -14,6 +14,9 @@ newtype VIdent = VIdent String deriving (Eq, Ord, Show, Read)
 data Program = Prog [Phrase]
   deriving (Eq, Ord, Show, Read)
 
+data Line = Line Phrase
+  deriving (Eq, Ord, Show, Read)
+
 data Phrase = Value LetDef | Expression Expr | TypeDecl TypeDef
   deriving (Eq, Ord, Show, Read)
 

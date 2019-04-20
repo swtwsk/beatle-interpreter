@@ -5,6 +5,7 @@ module Main where
 import LexBeatle
 import ParBeatle
 import AbsBeatle
+import LayoutBeatle
 import Interpreter
 
 import ErrM
@@ -13,6 +14,8 @@ import Control.Monad.IO.Class
 import System.Console.Haskeline
 
 import qualified Lambda.Lambda as L
+
+myLLexer = resolveLayout True . myLexer
 
 eitherFunc :: Either String L.Value -> String
 eitherFunc (Left err) = err
@@ -23,10 +26,11 @@ eitherFunc (Right val) = case val of
 
 process :: String -> IO ()
 process line = do
-    let res = pProgram (myLexer line)
+    let res = pLine (myLLexer line)
     case res of
         (Bad s) -> print "err"
-        (Ok s) -> print $ map eitherFunc (interpretProg s)
+        (Ok s) -> print . eitherFunc . interpretLine $ s
+        -- (Ok s) -> print $ map eitherFunc (interpretLine s)
 
 main :: IO ()
 main = runInputT defaultSettings loop

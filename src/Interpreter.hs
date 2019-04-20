@@ -14,6 +14,9 @@ type Value = L.Value
 type TransRes = Either String
 type Result = TransRes Value
 
+interpretLine :: Line -> Result
+interpretLine (Line phr) = interpretPhrase phr
+
 interpretProg :: Program -> [Result]
 interpretProg (Prog phr) = map interpretPhrase phr
 
@@ -142,12 +145,6 @@ transTIdent x = case x of
 transTPolyIdent :: TPolyIdent -> OldResult
 transTPolyIdent x = case x of
   TPolyIdent string -> failure x
-transVIdent :: VIdent -> OldResult
-transVIdent x = case x of
-  VIdent string -> failure x
-transProgram :: Program -> OldResult
-transProgram x = case x of
-  Prog phrases -> failure x
 transPhrase :: Phrase -> OldResult
 transPhrase x = case x of
   Value letdef -> failure x

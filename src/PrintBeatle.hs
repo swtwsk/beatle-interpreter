@@ -101,6 +101,10 @@ instance Print Program where
   prt i e = case e of
     Prog phrases -> prPrec i 0 (concatD [prt 0 phrases])
 
+instance Print Line where
+  prt i e = case e of
+    Line phrase -> prPrec i 0 (concatD [prt 0 phrase, doc (showString ";;")])
+
 instance Print Phrase where
   prt i e = case e of
     Value letdef -> prPrec i 0 (concatD [prt 0 letdef])

@@ -21,11 +21,11 @@ extra-source-files:
 
 library
   exposed-modules:
+      ParBeatle
       AbsBeatle
       ErrM
       LayoutBeatle
       LexBeatle
-      ParBeatle
       PrintBeatle
       Interpreter
       Lambda.Lambda

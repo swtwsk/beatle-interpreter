@@ -8,6 +8,7 @@ import ErrM
 
 }
 
+%name pLine Line
 %name pProgram Program
 -- no lexer declaration
 %monad { Err } { thenM } { returnM }
@@ -77,6 +78,8 @@ VIdent    :: { VIdent} : L_VIdent { VIdent ($1)}
 
 Program :: { Program }
 Program : ListPhrase { AbsBeatle.Prog (reverse $1) }
+Line :: { Line }
+Line : Phrase ';;' { AbsBeatle.Line $1 }
 Phrase :: { Phrase }
 Phrase : LetDef { AbsBeatle.Value $1 }
        | Expr { AbsBeatle.Expression $1 }

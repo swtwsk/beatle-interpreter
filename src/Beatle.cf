@@ -5,8 +5,9 @@ token TIdent (upper (letter | digit)*) ;         -- algebraic data type ident
 token TPolyIdent ('\'' (lower)+ ) ;              -- polymorphic type ident
 token VIdent (lower (letter | digit | '_')*) ;   -- value ident
 
-entrypoints Program ;
+entrypoints Line, Program ;
 Prog.       Program ::= [Phrase] ;
+Line.       Line    ::= Phrase ";;" ;
 Value.      Phrase  ::= LetDef ;                 -- value-definition
 Expression. Phrase  ::= Expr ;                   -- expression
 TypeDecl.   Phrase  ::= TypeDef ;                -- type-definition
