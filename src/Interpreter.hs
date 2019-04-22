@@ -33,8 +33,8 @@ interpretPhrase (Expression e) = do
 interpretPhrase (Value letdef) = do
     vmap <- get
     tld <- either fail return $ translateLetDef letdef
-    let (name, expr) = tld
-    ev <- either fail return $ EL.evalEnv vmap expr
+    let ((name, expr), isRec) = tld
+    ev <- either fail return $ EL.evalEnv vmap (if isRec then EL.Fix name expr else expr)
     put $ Map.insert name ev vmap
     return $ pure ev
 
@@ -115,9 +115,9 @@ translateExpr (ECond cond e1 e2) = do
 
 translateExpr (ELetIn letdef e) = do
     tl <- translateLetDef letdef
-    let (name, letbind) = tl
+    let ((name, letbind), isRec) = tl
     te <- translateExpr e
-    pure $ EL.Let name letbind te 
+    pure $ (if isRec then EL.LetRec else EL.Let) name letbind te
 translateExpr (EMatch (VIdent n) matchList) =
     Left "unimplemented"
 translateExpr (ELambda vlist e) = do
@@ -130,10 +130,10 @@ translateExpr (ELambda vlist e) = do
 translateExpr (EList elist) = Left "unimplemented"
 translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
 
-translateLetDef :: LetDef -> TransRes (String, EL.Expr)
+translateLetDef :: LetDef -> TransRes ((String, EL.Expr), Bool)
 translateLetDef ld = case ld of
-    Let letbinds -> head $ map translateLetBind letbinds
-    LetRec letbinds -> Left "unimplemented"
+    Let letbinds -> either Left (\x -> pure (x, False)) $ head $ map translateLetBind letbinds
+    LetRec letbinds -> either Left (\x -> pure (x, True)) $ head $ map translateLetBind letbinds
 
 translateLetBind :: LetBind -> TransRes (String, EL.Expr)
 translateLetBind (ConstBind p e) = do

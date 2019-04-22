@@ -22,6 +22,7 @@ data Expr = Var Name
           | UnOp UnOp Expr
           | Let Name Expr Expr
           | LetRec Name Expr Expr
+          | Fix Name Expr
           deriving (Show)
 
 -- data Pattern = Lit
@@ -72,6 +73,9 @@ translate (Let n e1 e2) = do
 translate (LetRec n e1 e2) = do
     te1 <- translate e1
     te2 <- translate e2
-    return $ L.App (L.Lam n te2) (L.App L.zComb (L.Lam n te1))
+    return $ L.App (L.Lam n te2) (L.Fix n te1)
+translate (Fix n e) = do
+    te <- translate e
+    return $ L.Fix n te
 
 -- eval (LetRec "fac" (Lam "n" (If (BinOp L.OpEq (Var "n") (Lit $ L.LInt 0)) (Lit $ L.LInt 1) (BinOp L.OpMul (Var "n") (App (Var "fac") (BinOp L.OpSub (Var "n") (Lit $ L.LInt 1)))))) (App (Var "fac") (Lit $ L.LInt 2)))

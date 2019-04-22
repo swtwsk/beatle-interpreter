@@ -15,6 +15,7 @@ data Expr = Var Name
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
           | Mapped Expr ValMap
+          | Fix Name Expr
           deriving (Show)
 
 data Lit = LInt Integer
@@ -26,7 +27,10 @@ data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
 data UnOp = OpNeg | OpNot
     deriving (Show)
 
-data Value = VInt Integer | VBool Bool | VClos Expr ValMap
+data Value = VInt Integer 
+           | VBool Bool 
+           | VClos Expr ValMap
+           | VFixed Name Expr ValMap
     deriving (Show)
 
 type ValMap = Map.Map Name Value
@@ -51,6 +55,10 @@ eval' e@(Lam _ _) = do
     env <- ask
     return (VClos e env)
 
+eval' (Fix n e) = do
+    env <- ask
+    return $ VFixed n e env
+
 eval' (App e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
@@ -58,7 +66,9 @@ eval' (App e1 e2) = do
     where
         apply (VClos (Lam x e1) env) e2 =
             runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
-        apply _ _ = throwError "First expression is not a function; it cannot be applied"
+        apply f@(VFixed fn (Lam x e1) env) e2 =
+            runExcept (runReaderT (eval' e1) (Map.insert fn f (Map.insert x e2 env)))
+        apply _ _ = throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
