@@ -30,7 +30,7 @@ data UnOp = OpNeg | OpNot
 data Value = VInt Integer 
            | VBool Bool 
            | VClos Expr ValMap
-           | VFixed Name Expr ValMap
+           | VFixed Name [(Name, Expr)] ValMap
     deriving (Show)
 
 type ValMap = Map.Map Name Value
@@ -57,7 +57,7 @@ eval' e@(Lam _ _) = do
 
 eval' (Fix n e) = do
     env <- ask
-    return $ VFixed n e env
+    return $ VFixed n [(n, e)] env
 
 eval' (App e1 e2) = do
     eval1 <- eval' e1
@@ -66,8 +66,11 @@ eval' (App e1 e2) = do
     where
         apply (VClos (Lam x e1) env) e2 =
             runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
-        apply f@(VFixed fn (Lam x e1) env) e2 =
-            runExcept (runReaderT (eval' e1) (Map.insert fn f (Map.insert x e2 env)))
+        apply (VFixed fn l env) e2 =
+            let (_, Lam x e1) = head $ filter (\(n, lam) -> n == fn) l in
+            runExcept (runReaderT (eval' e1) (Map.union (Map.fromList l') (Map.insert x e2 env)))
+            where
+                l' = map (\(n, e) -> (n, VFixed n l env)) l
         apply _ _ = throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
@@ -152,8 +155,15 @@ iComb :: Expr
 iComb = Lam "x" (Var "x")
 
 hFac :: Expr
-hFac = Lam "fac" (Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (BinOp OpMul (Var "n") (App (Var "fac") (BinOp OpSub (Var "n") (Lit $ LInt 1))))))
+hFac = (Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (BinOp OpMul (Var "n") (App (Var "fac") (BinOp OpSub (Var "n") (Lit $ LInt 1))))))
 
 omega :: Expr
 omega = App (Lam "x" (App (Var "x") (Var "x")))
             (Lam "x" (App (Var "x") (Var "x")))
+
+testing :: ValMap
+testing = Map.fromList [
+    ("f", VFixed "f" [
+        ("f", Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 0) (App (Var "g") (BinOp OpSub (Var "n") (Lit $ LInt 1))))),
+        ("g", Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (App (Var "f") (BinOp OpSub (Var "n") (Lit $ LInt 1)))))
+    ] Map.empty)]
