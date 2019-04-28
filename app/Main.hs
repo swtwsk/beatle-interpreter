@@ -28,6 +28,7 @@ eitherFunc (Right val) = return $ case val of
     L.VBool b -> show b
     L.VClos _ _ -> "<<function>>"
     L.VFixed _ _ _ -> "<<recursive function>>"
+    l@(L.VClos _ _ : t) -> "<<" ++ show . length l ++ " functions>>"
 
 process :: String -> IState ()
 process line = do

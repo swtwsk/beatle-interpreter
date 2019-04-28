@@ -20,6 +20,17 @@ type Result = TransRes Value
 
 type IState = StateT L.ValMap (InputT IO)
 
+type Name = String
+data Fun = Fun [(Name, EL.Expr)] | Rec [(Name, EL.Expr)]
+
+seqPair :: [(a, Either b c)] -> Either b [(a, c)]
+seqPair = sequence . seq'
+    where
+        seq' l = case l of
+            (a, Left b):t -> [Left b]
+            (a, Right b):t -> Right (a, b) : (seq' t)
+            [] -> []
+
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
 
@@ -33,10 +44,17 @@ interpretPhrase (Expression e) = do
 interpretPhrase (Value letdef) = do
     vmap <- get
     tld <- either fail return $ translateLetDef letdef
-    let ((name, expr), isRec) = tld
-    ev <- either fail return $ EL.evalEnv vmap (if isRec then EL.Fix name expr else expr)
-    put $ Map.insert name ev vmap
-    return $ pure ev
+    m <- case tld of
+        Fun list -> return . seqPair $ map (ev vmap) list
+        Rec list -> fail "unimplemented"
+    put $ Map.union (Map.fromList m) vmap
+    -- ev <- either fail return $ EL.evalEnv vmap (if isRec then EL.Fix name expr else expr)
+    -- put $ Map.insert name ev vmap
+    extr <- sequence $ map extract m
+    return $ pure extr
+    where
+        ev vmap (name, expr) = (name, EL.evalEnv vmap expr)
+        extract (_, expr) = expr
 
 translateExpr :: Expr -> TransRes EL.Expr
 translateExpr (EId (VIdent n)) = pure $ EL.Var n
@@ -115,9 +133,15 @@ translateExpr (ECond cond e1 e2) = do
 
 translateExpr (ELetIn letdef e) = do
     tl <- translateLetDef letdef
-    let ((name, letbind), isRec) = tl
     te <- translateExpr e
-    pure $ (if isRec then EL.LetRec else EL.Let) name letbind te
+    case tl of 
+        Fun list -> pure $ transLambda list te
+        Rec list -> Left "unimplemented (yet again)"
+    where
+        transLambda l e = case l of
+            (n, fe):t -> EL.Let n fe (transLambda t e)
+            [] -> e
+
 translateExpr (EMatch (VIdent n) matchList) =
     Left "unimplemented"
 translateExpr (ELambda vlist e) = do
@@ -130,10 +154,10 @@ translateExpr (ELambda vlist e) = do
 translateExpr (EList elist) = Left "unimplemented"
 translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
 
-translateLetDef :: LetDef -> TransRes ((String, EL.Expr), Bool)
+translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
-    Let letbinds -> either Left (\x -> pure (x, False)) $ head $ map translateLetBind letbinds
-    LetRec letbinds -> either Left (\x -> pure (x, True)) $ head $ map translateLetBind letbinds
+    Let letbinds -> either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
+    LetRec letbinds -> either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
 translateLetBind :: LetBind -> TransRes (String, EL.Expr)
 translateLetBind (ConstBind p e) = do
