@@ -43,7 +43,7 @@ extra-deps:
 - happy-1.19.9
 - alex-3.2.4
 - ghc-paths-0.1.0.9
-- network-3.0.1.1
+- network-2.8.0.0
 - random-1.1
 - syb-0.7
 - intero-0.1.39

@@ -30,6 +30,7 @@ library
       Interpreter
       Lambda.Lambda
       Lambda.EnrichedLambda
+      Utils
   other-modules:
       Paths_beatle
   hs-source-dirs:

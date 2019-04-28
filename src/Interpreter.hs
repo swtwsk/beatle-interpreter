@@ -4,10 +4,12 @@ module Interpreter where
 
 import System.Console.Haskeline
 import Control.Monad.State
+import Control.Monad.Except
 import qualified Data.Map as Map
 
 import AbsBeatle
 import ErrM
+import Utils
 
 import qualified Lambda.EnrichedLambda as EL
 import qualified Lambda.Lambda as L
@@ -16,20 +18,12 @@ type OldResult = Err String
 type Value = L.Value
 
 type TransRes = Either String
-type Result = TransRes Value
+type Result = TransRes [Value]
 
-type IState = StateT L.ValMap (InputT IO)
+type IState = StateT L.ValMap (ExceptT String (InputT IO))
 
 type Name = String
 data Fun = Fun [(Name, EL.Expr)] | Rec [(Name, EL.Expr)]
-
-seqPair :: [(a, Either b c)] -> Either b [(a, c)]
-seqPair = sequence . seq'
-    where
-        seq' l = case l of
-            (a, Left b):t -> [Left b]
-            (a, Right b):t -> Right (a, b) : (seq' t)
-            [] -> []
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -40,20 +34,19 @@ interpretLine (Line phr) = interpretPhrase phr
 interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     vmap <- get
-    return $ either Left (EL.evalEnv vmap) $ translateExpr e
+    ev <- return $ either Left (EL.eval vmap) $ translateExpr e
+    return $ either Left (\n -> return [n]) $ ev
 interpretPhrase (Value letdef) = do
     vmap <- get
-    tld <- either fail return $ translateLetDef letdef
+    tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
-        Fun list -> return . seqPair $ map (ev vmap) list
-        Rec list -> fail "unimplemented"
+        Fun list -> either throwError return $ seqPair $ map (ev vmap) list
+        Rec list -> either throwError (return . L.fixed vmap) $ seqPair $ map (\(n, e) -> (n, EL.translate' e)) list
     put $ Map.union (Map.fromList m) vmap
-    -- ev <- either fail return $ EL.evalEnv vmap (if isRec then EL.Fix name expr else expr)
-    -- put $ Map.insert name ev vmap
-    extr <- sequence $ map extract m
-    return $ pure extr
+    extr <- return $ map extract m
+    return . pure $ extr
     where
-        ev vmap (name, expr) = (name, EL.evalEnv vmap expr)
+        ev vmap (name, expr) = (name, EL.eval vmap expr)
         extract (_, expr) = expr
 
 translateExpr :: Expr -> TransRes EL.Expr
@@ -136,7 +129,7 @@ translateExpr (ELetIn letdef e) = do
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> Left "unimplemented (yet again)"
+        Rec list -> pure $ EL.LetRec list te
     where
         transLambda l e = case l of
             (n, fe):t -> EL.Let n fe (transLambda t e)

@@ -7,6 +7,8 @@ import qualified Data.Map as Map
 
 import qualified Lambda.Lambda as L
 
+import Utils
+
 type Name  = L.Name
 type BinOp = L.BinOp
 type UnOp  = L.UnOp
@@ -21,7 +23,7 @@ data Expr = Var Name
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
           | Let Name Expr Expr
-          | LetRec Name Expr Expr
+          | LetRec [(Name, Expr)] Expr
           | Fix Name Expr
           deriving (Show)
 
@@ -32,15 +34,10 @@ data Expr = Var Name
 
 type EState = ReaderT L.ValMap (Except String)
 
---eval :: Expr -> Either String Value
---eval expr = do
---    texpr <- runExcept (runReaderT (translate expr) Map.empty)
---    return $ L.eval texpr
-
-evalEnv :: L.ValMap -> Expr -> Either String Value
-evalEnv vmap expr = do
+eval :: L.ValMap -> Expr -> Either String L.Value
+eval vmap expr = do
     texpr <- runExcept (runReaderT (translate expr) vmap)
-    either throwError return $ L.evalEnv vmap texpr
+    either throwError return $ L.eval vmap texpr
 
 translate :: Expr -> EState L.Expr
 translate (Var n) = return $ L.Var n
@@ -66,16 +63,47 @@ translate (UnOp op e) = do
     return $ L.UnOp op te
 translate (Let n e1 e2) = do
     vmap <- ask
-    ev <- either fail return $ evalEnv vmap e1
+    ev <- either fail return $ eval vmap e1
     let nmap = Map.insert n ev vmap
     te2 <- translate e2
     return $ L.Mapped te2 nmap
-translate (LetRec n e1 e2) = do
-    te1 <- translate e1
-    te2 <- translate e2
-    return $ L.App (L.Lam n te2) (L.Fix n te1)
+translate (LetRec l e) = do
+    vmap <- ask
+    l' <- either fail return $ seqPair $ map (\(n, e) -> (n, translate' e)) l
+    let ml = Map.fromList $ L.fixed vmap l'
+    let nmap = Map.union ml vmap
+    te <- translate e
+    return $ L.Mapped te nmap
 translate (Fix n e) = do
     te <- translate e
     return $ L.Fix n te
+
+translate' :: Expr -> Either String L.Expr
+translate' (Var n) = return $ L.Var n
+translate' (Lam n e) = do 
+    te <- translate' e
+    return $ L.Lam n te
+translate' (Lit l) = return $ L.Lit l
+translate' (App e1 e2) = do
+    te1 <- translate' e1
+    te2 <- translate' e2
+    return $ L.App te1 te2
+translate' (If c e1 e2) = do
+    tc <- translate' c
+    te1 <- translate' e1
+    te2 <- translate' e2
+    return $ L.If tc te1 te2
+translate' (BinOp op e1 e2) = do
+    te1 <- translate' e1
+    te2 <- translate' e2
+    return $ L.BinOp op te1 te2
+translate' (UnOp op e) = do
+    te <- translate' e
+    return $ L.UnOp op te
+translate' (Let n e1 e2) = do
+    te1 <- translate' e1
+    te2 <- translate' e2
+    return $ L.App (L.Lam n te2) te1
+translate' (LetRec _ _) = Left "recursive recursion"
 
 -- eval (LetRec "fac" (Lam "n" (If (BinOp L.OpEq (Var "n") (Lit $ L.LInt 0)) (Lit $ L.LInt 1) (BinOp L.OpMul (Var "n") (App (Var "fac") (BinOp L.OpSub (Var "n") (Lit $ L.LInt 1)))))) (App (Var "fac") (Lit $ L.LInt 2)))

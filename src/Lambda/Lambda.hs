@@ -36,11 +36,11 @@ data Value = VInt Integer
 type ValMap = Map.Map Name Value
 type Env = ReaderT ValMap (Except String) Value
 
-eval :: Expr -> Either String Value
-eval expr = runExcept (runReaderT (eval' expr) Map.empty)
+fixed :: ValMap -> [(Name, Expr)] -> [(Name, Value)]
+fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 
-evalEnv :: ValMap -> Expr -> Either String Value
-evalEnv map expr = runExcept (runReaderT (eval' expr) map)
+eval :: ValMap -> Expr -> Either String Value
+eval map expr = runExcept (runReaderT (eval' expr) map)
 
 eval' :: Expr -> Env
 eval' (Lit l) = case l of
@@ -66,11 +66,13 @@ eval' (App e1 e2) = do
     where
         apply (VClos (Lam x e1) env) e2 =
             runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
-        apply (VFixed fn l env) e2 =
-            let (_, Lam x e1) = head $ filter (\(n, lam) -> n == fn) l in
-            runExcept (runReaderT (eval' e1) (Map.union (Map.fromList l') (Map.insert x e2 env)))
+        apply (VFixed fn l env) e2 = case found of
+            (_, Lam x e1):_ -> runExcept (runReaderT (eval' e1) (nmap x))
+            _ -> throwError "Expression is not a function; it cannot be applied"
             where
-                l' = map (\(n, e) -> (n, VFixed n l env)) l
+                found = filter (\(n, _) -> n == fn) l
+                l' = map (\(n, _) -> (n, VFixed n l env)) l
+                nmap x = Map.insert x e2 (Map.union (Map.fromList l') env)
         apply _ _ = throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
