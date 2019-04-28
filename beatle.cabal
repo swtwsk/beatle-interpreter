@@ -29,7 +29,6 @@ library
       PrintBeatle
       Interpreter
       Lambda.Lambda
-      Lambda.EnrichedLambda
       Utils
   other-modules:
       Paths_beatle

@@ -11,7 +11,6 @@ import AbsBeatle
 import ErrM
 import Utils
 
-import qualified Lambda.EnrichedLambda as EL
 import qualified Lambda.Lambda as L
 
 type OldResult = Err String
@@ -23,7 +22,7 @@ type Result = TransRes [Value]
 type IState = StateT L.ValMap (ExceptT String (InputT IO))
 
 type Name = String
-data Fun = Fun [(Name, EL.Expr)] | Rec [(Name, EL.Expr)]
+data Fun = Fun [(Name, L.Expr)] | Rec [(Name, L.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -34,105 +33,105 @@ interpretLine (Line phr) = interpretPhrase phr
 interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     vmap <- get
-    ev <- return $ either Left (EL.eval vmap) $ translateExpr e
+    ev <- return $ either Left (L.eval vmap) $ translateExpr e
     return $ either Left (\n -> return [n]) $ ev
 interpretPhrase (Value letdef) = do
     vmap <- get
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
         Fun list -> either throwError return $ seqPair $ map (ev vmap) list
-        Rec list -> either throwError (return . L.fixed vmap) $ seqPair $ map (\(n, e) -> (n, EL.translate' e)) list
+        Rec list -> return $ L.fixed vmap list
     put $ Map.union (Map.fromList m) vmap
     extr <- return $ map extract m
     return . pure $ extr
     where
-        ev vmap (name, expr) = (name, EL.eval vmap expr)
+        ev vmap (name, expr) = (name, L.eval vmap expr)
         extract (_, expr) = expr
 
-translateExpr :: Expr -> TransRes EL.Expr
-translateExpr (EId (VIdent n)) = pure $ EL.Var n
-translateExpr (EInt i) = pure . EL.Lit $ L.LInt i
-translateExpr ETrue = pure . EL.Lit $ L.LBool True
-translateExpr EFalse = pure . EL.Lit $ L.LBool False
+translateExpr :: Expr -> TransRes L.Expr
+translateExpr (EId (VIdent n)) = pure $ L.Var n
+translateExpr (EInt i) = pure . L.Lit $ L.LInt i
+translateExpr ETrue = pure . L.Lit $ L.LBool True
+translateExpr EFalse = pure . L.Lit $ L.LBool False
 translateExpr EListEmpty = Left "Unimplemented"
 translateExpr (ETypeAlg _) = Left "Unimplemented"
 translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.App te1 te2
+    pure $ L.App te1 te2
 translateExpr (ETyped _ _) = Left "Unimplemented"
 translateExpr (ENeg e) = do
     te <- translateExpr e
-    pure $ EL.UnOp L.OpNeg te
+    pure $ L.UnOp L.OpNeg te
 translateExpr (ENot e) = do
     te <- translateExpr e
-    pure $ EL.UnOp L.OpNot te
+    pure $ L.UnOp L.OpNot te
 translateExpr (EMul e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpMul te1 te2
+    pure $ L.BinOp L.OpMul te1 te2
 translateExpr (EDiv e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpDiv te1 te2
+    pure $ L.BinOp L.OpDiv te1 te2
 translateExpr (EAdd e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpAdd te1 te2
+    pure $ L.BinOp L.OpAdd te1 te2
 translateExpr (ESub e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpSub te1 te2
+    pure $ L.BinOp L.OpSub te1 te2
 translateExpr (EMod e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
     pure $ 
-        EL.BinOp L.OpSub te1 (EL.BinOp L.OpMul te2 (EL.BinOp L.OpDiv te1 te2))
+        L.BinOp L.OpSub te1 (L.BinOp L.OpMul te2 (L.BinOp L.OpDiv te1 te2))
 translateExpr (EListCons e1 e2) = Left "unimplemented"
 translateExpr (ELTH e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpLT te1 te2
+    pure $ L.BinOp L.OpLT te1 te2
 translateExpr (ELE e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpOr (EL.BinOp L.OpLT te1 te2) (EL.BinOp L.OpEq te1 te2)
+    pure $ L.BinOp L.OpOr (L.BinOp L.OpLT te1 te2) (L.BinOp L.OpEq te1 te2)
 translateExpr (EGTH e1 e2) = do
     le <- translateExpr (ELE e1 e2)
-    pure $ EL.UnOp L.OpNot le
+    pure $ L.UnOp L.OpNot le
 translateExpr (EGE e1 e2) = do
     less <- translateExpr (ELTH e1 e2)
-    pure $ EL.UnOp L.OpNot less
+    pure $ L.UnOp L.OpNot less
 translateExpr (EEQU e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpEq te1 te2
+    pure $ L.BinOp L.OpEq te1 te2
 translateExpr (ENE e1 e2) = do
     eq <- translateExpr (EEQU e1 e2)
-    pure $ EL.UnOp L.OpNot eq
+    pure $ L.UnOp L.OpNot eq
 translateExpr (EAnd e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpAnd te1 te2
+    pure $ L.BinOp L.OpAnd te1 te2
 translateExpr (EOr e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.BinOp L.OpOr te1 te2
+    pure $ L.BinOp L.OpOr te1 te2
 translateExpr (ECond cond e1 e2) = do
     tc <- translateExpr cond
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ EL.If tc te1 te2
+    pure $ L.If tc te1 te2
 
 translateExpr (ELetIn letdef e) = do
     tl <- translateLetDef letdef
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> pure $ EL.LetRec list te
+        Rec list -> pure $ L.LetRec list te
     where
         transLambda l e = case l of
-            (n, fe):t -> EL.Let n fe (transLambda t e)
+            (n, fe):t -> L.Let n fe (transLambda t e)
             [] -> e
 
 translateExpr (EMatch (VIdent n) matchList) =
@@ -142,7 +141,7 @@ translateExpr (ELambda vlist e) = do
     pure $ transLambda vlist te
     where 
         transLambda l e = case l of
-            (VIdent n):t -> EL.Lam n (transLambda t e)
+            (VIdent n):t -> L.Lam n (transLambda t e)
             [] -> e
 translateExpr (EList elist) = Left "unimplemented"
 translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
@@ -152,7 +151,7 @@ translateLetDef ld = case ld of
     Let letbinds -> either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
     LetRec letbinds -> either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (String, EL.Expr)
+translateLetBind :: LetBind -> TransRes (String, L.Expr)
 translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
     te <- translateExpr e
@@ -165,7 +164,7 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     pure (proc, transLambda tpl te)
     where
         transLambda l e = case l of
-            n:t  -> EL.Lam n (transLambda t e)
+            n:t  -> L.Lam n (transLambda t e)
             [] -> e
 
 -- TODO: This is totally not how it should be

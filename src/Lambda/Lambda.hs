@@ -5,16 +5,19 @@ import Control.Monad.Except
 
 import qualified Data.Map as Map
 
+import Utils
+
 type Name = String
 
 data Expr = Var Name
           | Lam Name Expr
           | Lit Lit
           | App Expr Expr
+          | Let Name Expr Expr
+          | LetRec [(Name, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
-          | Mapped Expr ValMap
           | Fix Name Expr
           deriving (Show)
 
@@ -29,7 +32,7 @@ data UnOp = OpNeg | OpNot
 
 data Value = VInt Integer 
            | VBool Bool 
-           | VClos Expr ValMap
+           | VClos Name Expr ValMap
            | VFixed Name [(Name, Expr)] ValMap
     deriving (Show)
 
@@ -51,20 +54,33 @@ eval' (Var var) = do
     env <- ask
     maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var env)
 
-eval' e@(Lam _ _) = do
+eval' (Lam n e) = do
     env <- ask
-    return (VClos e env)
+    return (VClos n e env)
 
-eval' (Fix n e) = do
+eval' (Let n e1 e2) = do
     env <- ask
-    return $ VFixed n [(n, e)] env
+    eval1 <- either fail return $ eval env e1
+    let nmap = Map.insert n eval1 env
+    either throwError return $ ev (Map.union nmap env)
+    where
+        ev :: ValMap -> Either String Value
+        ev env = runExcept (runReaderT (eval' e2) env)
+
+eval' (LetRec l e) = do
+    env <- ask
+    let nmap = Map.fromList $ fixed env l
+    either throwError return $ ev (Map.union nmap env)
+    where
+        ev :: ValMap -> Either String Value
+        ev env = runExcept (runReaderT (eval' e) env)
 
 eval' (App e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
     either throwError return $ apply eval1 eval2
     where
-        apply (VClos (Lam x e1) env) e2 =
+        apply (VClos x e1 env) e2 =
             runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
         apply (VFixed fn l env) e2 = case found of
             (_, Lam x e1):_ -> runExcept (runReaderT (eval' e1) (nmap x))
@@ -101,6 +117,8 @@ eval' (BinOp op e1 e2) = do
         binOp (VBool a) (VBool b) OpEq  = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpEq    = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpLT    = return . VBool $ a < b
+        binOp _ _ OpEq  = throwError boolTypeError
+        binOp _ _ OpLT  = throwError boolTypeError
         binOp _ _ OpAnd = throwError boolTypeError
         binOp _ _ OpOr  = throwError boolTypeError
 
@@ -113,12 +131,6 @@ eval' (UnOp op e) = do
         unOp _ OpNeg = throwError intTypeError
         unOp (VBool b) OpNot = return . VBool $ not b
         unOp _ OpNot = throwError boolTypeError
-
-eval' (Mapped e vmap) = do
-    env <- ask
-    either throwError return $ ev env
-    where
-        ev env = runExcept (runReaderT (eval' e) (Map.union vmap env))
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t

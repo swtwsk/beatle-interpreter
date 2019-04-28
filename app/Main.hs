@@ -27,7 +27,7 @@ eitherFunc (Right l) = return $ map showVal l
         showVal val = case val of
             L.VInt i -> show i ++ " : int"
             L.VBool b -> show b ++ " : bool"
-            L.VClos _ _ -> " = <fun>"
+            L.VClos n _ _ -> n ++ " = <fun>"
             L.VFixed n _ _ -> n ++ " = <fun>"
             -- clos@(L.VClos _ _ : t) -> "<<" ++ show . length clos ++ " functions>>"
 
