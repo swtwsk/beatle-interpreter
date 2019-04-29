@@ -11,17 +11,20 @@ import AbsBeatle
 import ErrM
 import Utils
 
+import Lambda.Lambda hiding (Expr(..), TypeDef(..))
 import qualified Lambda.Lambda as L
+import qualified Types
 
 type OldResult = Err String
-type Value = L.Value
+
+data InterRes = InterVal [Value]
+              | InterType Name [(Name, [Types.Type])]
 
 type TransRes = Either String
-type Result = TransRes [Value]
+type Result = TransRes InterRes
 
-type IState = StateT L.ValMap (ExceptT String (InputT IO))
+type IState = StateT L.Env (ExceptT String (InputT IO))
 
-type Name = String
 data Fun = Fun [(Name, L.Expr)] | Rec [(Name, L.Expr)]
 
 interpretLine :: Line -> IState Result
@@ -32,21 +35,31 @@ interpretLine (Line phr) = interpretPhrase phr
 
 interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
-    vmap <- get
-    ev <- return $ either Left (L.eval vmap) $ translateExpr e
-    return $ either Left (\n -> return [n]) $ ev
+    env <- get
+    ev <- return $ either Left (eval env) $ translateExpr e
+    return $ either Left (\n -> return $ InterVal [n]) $ ev
 interpretPhrase (Value letdef) = do
-    vmap <- get
+    env <- get
+    let vmap = values env
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
-        Fun list -> either throwError return $ seqPair $ map (ev vmap) list
+        Fun list -> either throwError return $ seqPair $ map (ev env) list
         Rec list -> return $ L.fixed vmap list
-    put $ Map.union (Map.fromList m) vmap
+    put $ env { values = Map.union (Map.fromList m) vmap }
     extr <- return $ map extract m
-    return . pure $ extr
+    return . pure . InterVal $ extr
     where
-        ev vmap (name, expr) = (name, L.eval vmap expr)
+        ev env (name, expr) = (name, eval env expr)
         extract (_, expr) = expr
+interpretPhrase (TypeDecl typedef) = do
+    env <- get
+    ttd <- either throwError return $ translateTypeDef typedef
+    let (tname, tdef) = ttd
+    let tmap = Map.insert tname tdef $ algtypes env
+    let cons = map (\(n, t) -> (n, (length t, tname))) $ L.consdef tdef
+    let cmap = Map.union (Map.fromList cons) (constructors env)
+    put $ env { constructors = cmap, algtypes = tmap }
+    return . pure $ InterType tname (L.consdef tdef)
 
 translateExpr :: Expr -> TransRes L.Expr
 translateExpr (EId (VIdent n)) = pure $ L.Var n
@@ -54,7 +67,6 @@ translateExpr (EInt i) = pure . L.Lit $ L.LInt i
 translateExpr ETrue = pure . L.Lit $ L.LBool True
 translateExpr EFalse = pure . L.Lit $ L.LBool False
 translateExpr EListEmpty = pure . L.Lit $ L.LNil
-translateExpr (ETypeAlg _) = Left "Unimplemented"
 translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
@@ -153,7 +165,10 @@ translateExpr (EList elist) = do
         trans l = case l of
             h:t -> L.Cons h (trans t)
             [] -> L.Lit L.LNil
-translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
+translateExpr (ETypeAlg (TIdent t)) = pure $ L.AlgCons t []
+translateExpr (ETypeCons (TIdent t) elist) = do
+    tlist <- sequence $ map translateExpr elist
+    pure $ L.AlgCons t tlist
 
 translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
@@ -180,6 +195,22 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
 translatePattern :: Pattern -> TransRes String
 translatePattern (PId (VIdent n)) = pure n
 translatePattern _ = Left "unimplemented"
+
+translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)
+translateTypeDef (TDef (TIdent t) polys ltcons) = do
+    let mpolys = map (\(TPolyIdent s) -> s) polys
+    tl <- sequence $ map translateTypeCons ltcons
+    return $ (t, L.TypeDef { L.polynames = mpolys, L.consdef = tl })
+
+translateTypeCons :: TypeCons -> TransRes (Name, [Types.Type])
+translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
+
+translateType :: Type -> Types.Type
+translateType TInt = Types.TInt
+translateType TBool = Types.TBool
+translateType (TAlgebraic (TIdent t)) = Types.TAlg t
+translateType (TPoly (TPolyIdent t)) = Types.TPoly t
+translateType (TFun t1 t2) = Types.TFun (translateType t1) (translateType t2)
 
 failure :: Show a => a -> OldResult
 failure x = Bad $ "Undefined case: " ++ show x

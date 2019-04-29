@@ -12,11 +12,12 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Maybe
+import Data.List (intercalate)
 import System.Console.Haskeline
 
 import qualified Data.Map as Map
 
-import qualified Lambda.Lambda as L
+import Lambda.Lambda hiding (Expr(..))
 
 title :: [String]
 title = 
@@ -32,30 +33,40 @@ title =
 myLLexer :: String -> [Token]
 myLLexer = resolveLayout True . myLexer
 
-eitherFunc :: Either String [L.Value] -> IState [String]
+eitherFunc :: Either String InterRes -> IState [String]
 eitherFunc (Left err) = return [err]
-eitherFunc (Right l) = return $ map showVal l
+eitherFunc (Right (InterType tn l)) = 
+    return ["type " ++ tn ++ " = " ++ (intercalate " | " $ map showType l)]
+    where
+        showType (name, tlist) = name ++ " " ++  (unwords $ map show tlist)
+eitherFunc (Right (InterVal l)) = return $ map showVal l
     where
         showVal val = case val of
-            L.VInt i -> show i ++ " : int"
-            L.VBool b -> show b ++ " : bool"
-            L.VClos n _ _ -> n ++ " = <fun>"
-            L.VFixed n _ _ -> n ++ " = <fun>"
-            L.VCons v1 L.VNil -> "[" ++ showLeftList v1 ++ "] : list"
-            L.VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "] : list"
-            L.VNil -> "[] : list"
+            VInt i -> show i ++ " : int"
+            VBool b -> show b ++ " : bool"
+            VClos n _ _ -> n ++ " = <fun>"
+            VFixed n _ _ -> n ++ " = <fun>"
+            VCons v1 VNil -> "[" ++ showLeftList v1 ++ "] : list"
+            VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "] : list"
+            VNil -> "[] : list"
+            VAlg cname tname lv -> 
+                cname ++ " " ++ showList lv ++ " : " ++ tname
+                where
+                    showList l = if length l <= 0 then "" 
+                        else "(" ++ (intercalate ", " $ map showVal lv) ++ ")"
         showLeftList v = case v of
-            L.VInt i -> show i
-            L.VBool b -> show b
-            L.VClos _ _ _ -> "<fun>"
-            L.VFixed _ _ _ -> "<fun>"
-            L.VCons v1 L.VNil -> "[" ++ showLeftList v1 ++ "]"
-            L.VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
-            L.VNil -> "[]"
+            VInt i -> show i
+            VBool b -> show b
+            VClos _ _ _ -> "<fun>"
+            VFixed _ _ _ -> "<fun>"
+            VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
+            VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
+            VNil -> "[]"
         showRightList v = case v of
-            L.VCons v1 L.VNil -> showLeftList v1
-            L.VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
-            L.VNil -> ""
+            VCons v1 VNil -> showLeftList v1
+            VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
+            VNil -> ""
+
 process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
@@ -63,12 +74,10 @@ process line = do
         (Bad s) -> if null line then return () else liftIO $ putStrLn "err"
         (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
         -- (Ok s) -> print $ map eitherFunc (interpretLine s)
-
-main :: IO ()
-main = (putStr . unlines $ title) >> run
+        
+run :: IO ()
+run = runInputT defaultSettings (runExceptT $ runStateT loop emptyEnv) >>= rerun run
     where
-        run :: IO ()
-        run = runInputT defaultSettings (runExceptT $ runStateT loop Map.empty) >>= rerun run
         loop :: IState ()
         loop = do
             minput <- lift $ lift $ getInputLine "λ "
@@ -76,6 +85,10 @@ main = (putStr . unlines $ title) >> run
                 Nothing -> return ()
                 Just ":q" -> lift $ lift $ outputStrLn "Goodbye."
                 Just input -> process input >> loop
-        rerun :: IO () -> Either String b -> IO ()
-        rerun f (Left err) = putStrLn ("Error: " ++ err) >> f
-        rerun _ (Right _) = return ()
+
+rerun :: IO () -> Either String b -> IO ()
+rerun f (Left err) = putStrLn ("Error: " ++ err) >> f
+rerun _ (Right _) = return ()
+
+main :: IO ()
+main = (putStr . unlines $ title) >> run

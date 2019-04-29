@@ -1,10 +1,26 @@
-module Lambda.Lambda where
+module Lambda.Lambda (
+    Name,
+    Expr(..),
+    Lit(..),
+    BinOp(..),
+    UnOp(..),
+    Value(..),
+    TypeDef(..),
+    ValMap,
+    ConsMap,
+    TypeMap,
+    Env(..),
+    eval,
+    fixed,
+    emptyEnv
+) where
 
 import Control.Monad.Reader
 import Control.Monad.Except
 
 import qualified Data.Map as Map
 
+import Types
 import Utils
 
 type Name = String
@@ -19,6 +35,7 @@ data Expr = Var Name
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
           | Cons Expr Expr
+          | AlgCons Name [Expr]
           deriving (Show)
 
 data Lit = LInt Integer
@@ -37,18 +54,35 @@ data Value = VInt Integer
            | VFixed Name [(Name, Expr)] ValMap
            | VCons Value Value
            | VNil
+           | VAlg Name TypeName [Value]
     deriving (Show)
 
+data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
+
 type ValMap = Map.Map Name Value
-type Env = ReaderT ValMap (Except String) Value
+type TypeName = String
+type ConsMap = Map.Map Name (Int, TypeName)
+type TypeMap = Map.Map TypeName TypeDef
+
+data Env = Env 
+    { values :: ValMap
+    , constructors :: ConsMap
+    , algtypes  :: TypeMap }
+
+emptyEnv :: Env
+emptyEnv = Env { values = Map.empty
+               , constructors = Map.empty
+               , algtypes = Map.empty }
+
+type EvalReader = ReaderT Env (Except String) Value
 
 fixed :: ValMap -> [(Name, Expr)] -> [(Name, Value)]
 fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 
-eval :: ValMap -> Expr -> Either String Value
+eval :: Env -> Expr -> Either String Value
 eval map expr = runExcept (runReaderT (eval' expr) map)
 
-eval' :: Expr -> Env
+eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
     LInt i -> return (VInt i)
     LBool b -> return (VBool b)
@@ -56,44 +90,49 @@ eval' (Lit l) = case l of
 
 eval' (Var var) = do
     env <- ask
-    maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var env)
+    let vmap = values env
+    maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var vmap)
 
 eval' (Lam n e) = do
     env <- ask
-    return (VClos n e env)
+    let vmap = values env
+    return (VClos n e vmap)
 
 eval' (Let n e1 e2) = do
     env <- ask
+    let vmap = values env
     eval1 <- either fail return $ eval env e1
-    let nmap = Map.insert n eval1 env
-    either throwError return $ ev (Map.union nmap env)
+    let nmap = Map.insert n eval1 vmap
+    either throwError return $ ev (Map.union nmap vmap) env
     where
-        ev :: ValMap -> Either String Value
-        ev env = runExcept (runReaderT (eval' e2) env)
+        ev :: ValMap -> Env -> Either String Value
+        ev vmap env = runExcept (runReaderT (eval' e2) (env {values=vmap}))
 
 eval' (LetRec l e) = do
     env <- ask
-    let nmap = Map.fromList $ fixed env l
-    either throwError return $ ev (Map.union nmap env)
+    let vmap = values env
+    let nmap = Map.fromList $ fixed vmap l
+    either throwError return $ ev (Map.union nmap vmap) env
     where
-        ev :: ValMap -> Either String Value
-        ev env = runExcept (runReaderT (eval' e) env)
+        ev :: ValMap -> Env -> Either String Value
+        ev vmap env = runExcept (runReaderT (eval' e) (env {values=vmap}))
 
 eval' (App e1 e2) = do
+    env <- ask
     eval1 <- eval' e1
     eval2 <- eval' e2
-    either throwError return $ apply eval1 eval2
+    either throwError return $ apply eval1 eval2 env
     where
-        apply (VClos x e1 env) e2 =
-            runExcept (runReaderT (eval' e1) (Map.insert x e2 env))
-        apply (VFixed fn l env) e2 = case found of
-            (_, Lam x e1):_ -> runExcept (runReaderT (eval' e1) (nmap x))
+        apply (VClos x e1 vmap) e2 env =
+            runExcept (runReaderT (eval' e1) (env {values=Map.insert x e2 vmap}))
+        apply (VFixed fn l vmap) e2 env = case found of
+            (_, Lam x e1):_ -> runExcept (runReaderT (eval' e1) (env {values=nmap x}))
             _ -> throwError "Expression is not a function; it cannot be applied"
             where
                 found = filter (\(n, _) -> n == fn) l
-                l' = map (\(n, _) -> (n, VFixed n l env)) l
-                nmap x = Map.insert x e2 (Map.union (Map.fromList l') env)
-        apply _ _ = throwError "Expression is not a function; it cannot be applied"
+                l' = map (\(n, _) -> (n, VFixed n l vmap)) l
+                nmap x = Map.insert x e2 (Map.union (Map.fromList l') vmap)
+        apply _ _ _ = throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -140,6 +179,22 @@ eval' (Cons e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
     return $ VCons eval1 eval2
+
+eval' (AlgCons cname le) = do
+    env <- ask
+    let cmap = constructors env
+    c <- maybe (throwError $ "Unbound constructor " ++ cname) return $
+         (Map.lookup cname cmap)
+    let (count, tname) = c
+    args <- mapM eval' le
+    let arglen = length args
+    if arglen == count then return $ VAlg cname tname $ args
+    else throwError $ err cname count arglen
+    where
+        err :: String -> Int -> Int -> String
+        err cname expected provided =
+            "The constructor " ++ cname ++ " expects " ++ show expected 
+            ++ " argument(s), but is applied to " ++ show provided ++ " argument(s)"
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t

@@ -29,6 +29,7 @@ library
       PrintBeatle
       Interpreter
       Lambda.Lambda
+      Types
       Utils
   other-modules:
       Paths_beatle
