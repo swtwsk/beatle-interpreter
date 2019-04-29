@@ -53,7 +53,7 @@ translateExpr (EId (VIdent n)) = pure $ L.Var n
 translateExpr (EInt i) = pure . L.Lit $ L.LInt i
 translateExpr ETrue = pure . L.Lit $ L.LBool True
 translateExpr EFalse = pure . L.Lit $ L.LBool False
-translateExpr EListEmpty = Left "Unimplemented"
+translateExpr EListEmpty = pure . L.Lit $ L.LNil
 translateExpr (ETypeAlg _) = Left "Unimplemented"
 translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
@@ -87,7 +87,10 @@ translateExpr (EMod e1 e2) = do
     te2 <- translateExpr e2
     pure $ 
         L.BinOp L.OpSub te1 (L.BinOp L.OpMul te2 (L.BinOp L.OpDiv te1 te2))
-translateExpr (EListCons e1 e2) = Left "unimplemented"
+translateExpr (EListCons e1 e2) = do
+    te1 <- translateExpr e1
+    te2 <- translateExpr e2
+    pure $ L.Cons te1 te2
 translateExpr (ELTH e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
@@ -143,7 +146,13 @@ translateExpr (ELambda vlist e) = do
         transLambda l e = case l of
             (VIdent n):t -> L.Lam n (transLambda t e)
             [] -> e
-translateExpr (EList elist) = Left "unimplemented"
+translateExpr (EList elist) = do
+    tlist <- sequence $ map translateExpr elist
+    pure . trans $ tlist
+    where 
+        trans l = case l of
+            h:t -> L.Cons h (trans t)
+            [] -> L.Lit L.LNil
 translateExpr (ETypeCons (TIdent t) elist) = Left "unimplemented"
 
 translateLetDef :: LetDef -> TransRes Fun

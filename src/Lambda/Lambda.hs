@@ -18,11 +18,12 @@ data Expr = Var Name
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
-          | Fix Name Expr
+          | Cons Expr Expr
           deriving (Show)
 
 data Lit = LInt Integer
          | LBool Bool
+         | LNil
          deriving (Show)
 
 data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
@@ -34,6 +35,8 @@ data Value = VInt Integer
            | VBool Bool 
            | VClos Name Expr ValMap
            | VFixed Name [(Name, Expr)] ValMap
+           | VCons Value Value
+           | VNil
     deriving (Show)
 
 type ValMap = Map.Map Name Value
@@ -49,6 +52,7 @@ eval' :: Expr -> Env
 eval' (Lit l) = case l of
     LInt i -> return (VInt i)
     LBool b -> return (VBool b)
+    LNil -> return VNil
 
 eval' (Var var) = do
     env <- ask
@@ -131,6 +135,11 @@ eval' (UnOp op e) = do
         unOp _ OpNeg = throwError intTypeError
         unOp (VBool b) OpNot = return . VBool $ not b
         unOp _ OpNot = throwError boolTypeError
+
+eval' (Cons e1 e2) = do
+    eval1 <- eval' e1
+    eval2 <- eval' e2
+    return $ VCons eval1 eval2
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t

@@ -41,8 +41,21 @@ eitherFunc (Right l) = return $ map showVal l
             L.VBool b -> show b ++ " : bool"
             L.VClos n _ _ -> n ++ " = <fun>"
             L.VFixed n _ _ -> n ++ " = <fun>"
-            -- clos@(L.VClos _ _ : t) -> "<<" ++ show . length clos ++ " functions>>"
-
+            L.VCons v1 L.VNil -> "[" ++ showLeftList v1 ++ "] : list"
+            L.VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "] : list"
+            L.VNil -> "[] : list"
+        showLeftList v = case v of
+            L.VInt i -> show i
+            L.VBool b -> show b
+            L.VClos _ _ _ -> "<fun>"
+            L.VFixed _ _ _ -> "<fun>"
+            L.VCons v1 L.VNil -> "[" ++ showLeftList v1 ++ "]"
+            L.VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
+            L.VNil -> "[]"
+        showRightList v = case v of
+            L.VCons v1 L.VNil -> showLeftList v1
+            L.VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
+            L.VNil -> ""
 process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
