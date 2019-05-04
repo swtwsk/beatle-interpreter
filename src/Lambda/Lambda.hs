@@ -11,6 +11,7 @@ module Lambda.Lambda (
     AlgTypeMap,
     Env(..),
     eval,
+    typeCheck,
     fixed,
     emptyEnv
 ) where
@@ -91,9 +92,12 @@ fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
-    typed <- runExcept (runReaderT (typeOf expr) (_types env))
+    typed <- typeCheck (_types env) expr
     evaled <- runExcept (runReaderT (eval' expr) env)
     return (evaled, typed)
+
+typeCheck :: TypeMap -> Expr -> Either String Type
+typeCheck tmap expr = runExcept (runReaderT (typeOf expr) tmap)
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -208,7 +212,8 @@ eval' (AlgCons cname le) = do
         err :: String -> Int -> Int -> String
         err cname expected provided =
             "The constructor " ++ cname ++ " expects " ++ show expected 
-            ++ " argument(s), but is applied to " ++ show provided ++ " argument(s)"
+            ++ " argument(s), but is applied to " 
+            ++ show provided ++ " argument(s)"
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t
@@ -240,7 +245,14 @@ typeOf (App e1 e2) = do
 typeOf (Let n e1 e2) = do
     t1 <- typeOf e1
     local (Map.insert n t1) (typeOf e2)
-typeOf (LetRec l e) = throwError "Type: unimplemented"
+typeOf (LetRec l e) = do
+    tl <- mapM (\(_, _, e') -> local (Map.union tmap) (typeOf e')) l
+    let typeMap = Map.fromList $ zip nlist tl
+    local (Map.union typeMap) (typeOf e)
+    where
+        tlist = map (\(n, t, _) -> (n, t)) l
+        tmap  = Map.fromList tlist
+        nlist = map (\(n, _, _) -> n) l
 typeOf (If cond e1 e2) = do
     tc <- checkType cond TBool
     t1 <- typeOf e1
@@ -265,7 +277,8 @@ checkType :: Expr -> Type -> TypeReader
 checkType e t = do
     t' <- typeOf e
     if t == t' then return t 
-    else throwError $ "Type error: " ++ show e ++ " should be " ++ show t ++ " but is of " ++ show t'
+    else throwError $ "Type error: " ++ show e ++ " should be " ++ show t 
+        ++ " but is of type " ++ show t'
 
 checkBinOpType :: Expr -> Expr -> Type -> TypeReader
 checkBinOpType e1 e2 t = do

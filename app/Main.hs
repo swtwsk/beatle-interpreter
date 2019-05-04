@@ -44,10 +44,10 @@ eitherFunc (Right (InterType tn l)) =
 eitherFunc (Right (InterVal l)) = return $ map showVal l
     where
         showVal (val, t) = case val of
-            VInt i -> show i ++ " : " ++ show t
-            VBool b -> show b ++ " : " ++ show t
-            VClos n _ _ -> n ++ " = <fun>"
-            VFixed n _ _ -> n ++ " = <fun>"
+            VInt i -> "- : " ++ show t ++ " = " ++ show i
+            VBool b -> "- : " ++ show t ++ " = " ++ show b
+            VClos n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
+            VFixed n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
             VCons v1 VNil -> "[" ++ showLeftList v1 ++ "] : list"
             VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "] : list"
             VNil -> "[] : list"

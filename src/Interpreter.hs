@@ -44,7 +44,12 @@ interpretPhrase (Value letdef) = do
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
         Fun list -> either throwError return $ seqPair $ map (ev env) list
-        Rec list -> return $ L.fixed vmap list
+        Rec list -> do
+            let tmap  = Map.fromList $ map (\(n, t, _) -> (n, t)) list
+                tmap' = Map.union tmap (_types env)
+            tl <- either throwError return $ 
+                mapM (\(_, _, e') -> typeCheck tmap' e') list
+            return $ L.fixed vmap list
     let m' = map (\(n, (v, _)) -> (n, v)) m
     let t' = map (\(n, (_, t)) -> (n, t)) m
     put $ env { _values = Map.union (Map.fromList m') vmap
@@ -178,8 +183,10 @@ translateExpr (ETypeCons (TIdent t) elist) = do
 
 translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
-    Let letbinds -> either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
-    LetRec letbinds -> either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
+    Let letbinds -> 
+        either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
+    LetRec letbinds -> 
+        either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
 translateLetBind :: LetBind -> TransRes (String, T.Type, L.Expr)
 translateLetBind (ConstBind p e) = do
@@ -189,13 +196,13 @@ translateLetBind (ConstBind p e) = do
     pure (n, t, te)
 -- TODO: read rt
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
-    let mappedpl = map translatePattern pl
-    tpl <- sequence mappedpl
+    tpl <- sequence $ map translatePattern pl
     te <- translateExpr e
     trt <- case translateRetType rt of
         Nothing -> Left "function return type not specified"
         Just trt' -> pure trt'
-    pure (proc, trt, transLambda tpl te)
+    let proctype = foldr (\(_, t) acc -> T.TFun t acc) trt tpl
+    pure (proc, proctype, transLambda tpl te)
     where
         transLambda l e = case l of
             (n, typ):t  -> L.Lam n typ (transLambda t e)
