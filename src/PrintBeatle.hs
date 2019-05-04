@@ -94,8 +94,6 @@ instance Print TPolyIdent where
 
 instance Print VIdent where
   prt _ (VIdent i) = doc (showString i)
-  prtList _ [x] = concatD [prt 0 x]
-  prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
 
 instance Print Program where
   prt i e = case e of
@@ -197,9 +195,16 @@ instance Print Expr where
     ECond expr1 expr2 expr3 -> prPrec i 0 (concatD [doc (showString "if"), prt 0 expr1, doc (showString "then"), prt 0 expr2, doc (showString "else"), prt 0 expr3])
     ELetIn letdef expr -> prPrec i 0 (concatD [prt 0 letdef, doc (showString "in"), prt 0 expr])
     EMatch vident matchings -> prPrec i 0 (concatD [doc (showString "match"), prt 0 vident, doc (showString "with"), doc (showString "{"), prt 0 matchings, doc (showString "}")])
-    ELambda vidents expr -> prPrec i 0 (concatD [doc (showString "\\"), prt 0 vidents, doc (showString "->"), prt 0 expr])
+    ELambda lambdavis expr -> prPrec i 0 (concatD [doc (showString "\\"), prt 0 lambdavis, doc (showString "->"), prt 0 expr])
     EList exprs -> prPrec i 0 (concatD [doc (showString "["), prt 0 exprs, doc (showString "]")])
     ETypeCons tident exprs -> prPrec i 0 (concatD [prt 0 tident, doc (showString "of"), doc (showString "("), prt 0 exprs, doc (showString ")")])
+  prtList _ [x] = concatD [prt 0 x]
+  prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
+
+instance Print LambdaVI where
+  prt i e = case e of
+    TypedVId vident type_ -> prPrec i 0 (concatD [doc (showString "("), prt 0 vident, doc (showString ":"), prt 0 type_, doc (showString ")")])
+    LambdaVId vident -> prPrec i 0 (concatD [prt 0 vident])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
 
@@ -209,7 +214,7 @@ instance Print [Expr] where
 instance Print [Matching] where
   prt = prtList
 
-instance Print [VIdent] where
+instance Print [LambdaVI] where
   prt = prtList
 
 instance Print Matching where

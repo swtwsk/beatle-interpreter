@@ -17,7 +17,7 @@ import qualified Types
 
 type OldResult = Err String
 
-data InterRes = InterVal [Value]
+data InterRes = InterVal [(Value, Types.Type)]
               | InterType Name [(Name, [Types.Type])]
 
 type TransRes = Either String
@@ -45,7 +45,8 @@ interpretPhrase (Value letdef) = do
     m <- case tld of
         Fun list -> either throwError return $ seqPair $ map (ev env) list
         Rec list -> return $ L.fixed vmap list
-    put $ env { values = Map.union (Map.fromList m) vmap }
+    let m' = map (\(n, (v, t)) -> (n, v)) m
+    put $ env { values = Map.union (Map.fromList m') vmap }
     extr <- return $ map extract m
     return . pure . InterVal $ extr
     where
@@ -156,7 +157,10 @@ translateExpr (ELambda vlist e) = do
     pure $ transLambda vlist te
     where 
         transLambda l e = case l of
-            (VIdent n):t -> L.Lam n (transLambda t e)
+            (TypedVId (VIdent n) typ):t -> 
+                L.Lam n (translateType typ) (transLambda t e)
+            -- STUPID PLACEHOLDER
+            (LambdaVId (VIdent n)):t -> L.Lam n Types.TInt (transLambda t e)
             [] -> e
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
@@ -178,8 +182,9 @@ translateLetDef ld = case ld of
 translateLetBind :: LetBind -> TransRes (String, L.Expr)
 translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
+    let (n, _) = tp
     te <- translateExpr e
-    pure (tp, te)
+    pure (n, te)
 -- TODO: read rt
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     let mappedpl = map translatePattern pl
@@ -188,12 +193,13 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     pure (proc, transLambda tpl te)
     where
         transLambda l e = case l of
-            n:t  -> L.Lam n (transLambda t e)
+            (n, typ):t  -> L.Lam n typ (transLambda t e)
             [] -> e
 
 -- TODO: This is totally not how it should be
-translatePattern :: Pattern -> TransRes String
-translatePattern (PId (VIdent n)) = pure n
+translatePattern :: Pattern -> TransRes (String, Types.Type)
+translatePattern (PId (VIdent n)) = Left "unimplemented"
+translatePattern (PTyped (PId (VIdent n)) t) = pure (n, translateType t)
 translatePattern _ = Left "unimplemented"
 
 translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)

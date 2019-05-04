@@ -26,7 +26,7 @@ import Utils
 type Name = String
 
 data Expr = Var Name
-          | Lam Name Expr
+          | Lam Name Type Expr
           | Lit Lit
           | App Expr Expr
           | Let Name Expr Expr
@@ -69,6 +69,8 @@ data Env = Env
     , constructors :: ConsMap
     , algtypes  :: TypeMap }
 
+type TypeReader = ReaderT (Map.Map Name Type) (Except String) Type
+
 emptyEnv :: Env
 emptyEnv = Env { values = Map.empty
                , constructors = Map.empty
@@ -76,11 +78,14 @@ emptyEnv = Env { values = Map.empty
 
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: ValMap -> [(Name, Expr)] -> [(Name, Value)]
-fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
+fixed :: ValMap -> [(Name, Expr)] -> [(Name, (Value, Type))]
+fixed env l = map (\(n, _) -> (n, (VFixed n l env, TInt))) l
 
-eval :: Env -> Expr -> Either String Value
-eval map expr = runExcept (runReaderT (eval' expr) map)
+eval :: Env -> Expr -> Either String (Value, Type)
+eval map expr = do
+    typed <- runExcept (runReaderT (typeOf expr) Map.empty)
+    evaled <- runExcept (runReaderT (eval' expr) map)
+    return (evaled, typed)
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -93,7 +98,7 @@ eval' (Var var) = do
     let vmap = values env
     maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var vmap)
 
-eval' (Lam n e) = do
+eval' (Lam n t e) = do
     env <- ask
     let vmap = values env
     return (VClos n e vmap)
@@ -102,7 +107,8 @@ eval' (Let n e1 e2) = do
     env <- ask
     let vmap = values env
     eval1 <- either fail return $ eval env e1
-    let nmap = Map.insert n eval1 vmap
+    let (eval1', _) = eval1
+    let nmap = Map.insert n eval1' vmap
     either throwError return $ ev (Map.union nmap vmap) env
     where
         ev :: ValMap -> Env -> Either String Value
@@ -111,7 +117,7 @@ eval' (Let n e1 e2) = do
 eval' (LetRec l e) = do
     env <- ask
     let vmap = values env
-    let nmap = Map.fromList $ fixed vmap l
+    let nmap = Map.fromList $ map (\(n, (v, t)) -> (n, v)) $ fixed vmap l
     either throwError return $ ev (Map.union nmap vmap) env
     where
         ev :: ValMap -> Env -> Either String Value
@@ -126,7 +132,7 @@ eval' (App e1 e2) = do
         apply (VClos x e1 vmap) e2 env =
             runExcept (runReaderT (eval' e1) (env {values=Map.insert x e2 vmap}))
         apply (VFixed fn l vmap) e2 env = case found of
-            (_, Lam x e1):_ -> runExcept (runReaderT (eval' e1) (env {values=nmap x}))
+            (_, Lam x _ e1):_ -> runExcept (runReaderT (eval' e1) (env {values=nmap x}))
             _ -> throwError "Expression is not a function; it cannot be applied"
             where
                 found = filter (\(n, _) -> n == fn) l
@@ -184,11 +190,11 @@ eval' (AlgCons cname le) = do
     env <- ask
     let cmap = constructors env
     c <- maybe (throwError $ "Unbound constructor " ++ cname) return $
-         (Map.lookup cname cmap)
+         Map.lookup cname cmap
     let (count, tname) = c
     args <- mapM eval' le
     let arglen = length args
-    if arglen == count then return $ VAlg cname tname $ args
+    if arglen == count then return $ VAlg cname tname args
     else throwError $ err cname count arglen
     where
         err :: String -> Int -> Int -> String
@@ -205,43 +211,55 @@ intTypeError = typeError "int"
 boolTypeError :: String
 boolTypeError = typeError "bool"
 
-example1 :: Expr
-example1 = App (App (App (Lam "f" (Lam "g" (Lam "h" (App (App (Var "f") (App (App (Var "g") (Lit $ LInt 1)) (Lit $ LInt 2))) (App (App (Var "h") (Lit $ LInt 3)) (Lit $ LInt 4)))))) (Lam "x" (Lam "y" (BinOp OpAdd (Var "x") (Var "y"))))) (Lam "x" (Lam "y" (BinOp OpSub (Var "x") (Var "y"))))) (Lam "x" (Lam "y" (BinOp OpMul (Var "x") (Var "y"))))
+typeOf :: Expr -> TypeReader
+typeOf (Lit l) = case l of
+    LInt i -> return TInt
+    LBool b -> return TBool
+    LNil -> throwError "Type: list type unimplemented"
+typeOf (Var var) = do
+    tenv <- ask
+    case Map.lookup var tenv of
+        Nothing -> throwError $ "Type: Unbound value " ++ var
+        Just t -> return t
+typeOf (Lam n t0 e) = do
+    t1 <- local (Map.insert n t0) (typeOf e)
+    return $ TFun t0 t1
+typeOf (App e1 e2) = do
+    t1 <- typeOf e1
+    case t1 of
+        TFun tl tr -> checkType e2 tl >> return tr
+        _ -> throwError $ "Type error: " ++ show e1 ++ " is of type " ++ show t1
+typeOf (Let n e1 e2) = do
+    t1 <- typeOf e1
+    local (Map.insert n t1) (typeOf e2)
+typeOf (LetRec l e) = throwError "Type: unimplemented"
+typeOf (If cond e1 e2) = do
+    tc <- checkType cond TBool
+    t1 <- typeOf e1
+    checkType e2 t1 >> return t1
+typeOf (BinOp op e1 e2) = case op of
+    OpAdd -> checkBinOpType e1 e2 TInt
+    OpMul -> checkBinOpType e1 e2 TInt
+    OpSub -> checkBinOpType e1 e2 TInt
+    OpDiv -> checkBinOpType e1 e2 TInt
+    OpAnd -> checkBinOpType e1 e2 TBool
+    OpOr  -> checkBinOpType e1 e2 TBool
+    OpEq  -> 
+        (checkBinOpType e1 e2 TInt >> return TBool) `catchError` (\_ -> checkBinOpType e1 e2 TBool)
+    OpLT  -> checkBinOpType e1 e2 TInt
+typeOf (UnOp op e) = case op of
+    OpNeg -> checkType e TInt
+    OpNot -> checkType e TBool
+typeOf (Cons e1 e2) = throwError "Type: list cons unimplemented"
+typeOf (AlgCons cname le) = throwError "Type: algcons unimplemented"
 
-twice :: Expr
-twice = Lam "f" (Lam "x" (App (Var "f") (App (Var "f") (Var "x"))))
+checkType :: Expr -> Type -> TypeReader
+checkType e t = do
+    t' <- typeOf e
+    if t == t' then return t 
+    else throwError $ "Type error: " ++ show e ++ " should be " ++ show t ++ " but is of " ++ show t'
 
-not' :: Expr
-not' = Lam "x" (UnOp OpNeg (Var "x"))
-
-example2 :: Expr
-example2 = App (Lam "t" (App (App (Var "t") (not')) (Lit $ LBool True))) twice
-
-yComb :: Expr
-yComb = Lam "h" (App (Lam "x" (App (Var "h") (App (Var "x") (Var "x")))) (Lam "x" (App (Var "h") (App (Var "x") (Var "x")))))
-
-zComb :: Expr
-zComb = Lam "f" (App (Lam "x" (App (Var "f") (Lam "v" (App (App (Var "x") (Var "x")) (Var "v"))))) (Lam "x" (App (Var "f") (Lam "v" (App (App (Var "x") (Var "x")) (Var "v"))))))
-
-sComb :: Expr
-sComb = Lam "f" (Lam "g" (Lam "x" (App (App (Var "f") (Var "x")) (App (Var "g") (Var "x")))))
-
-kComb :: Expr
-kComb = Lam "x" (Lam "y" (Var "x"))
-
-iComb :: Expr
-iComb = Lam "x" (Var "x")
-
-hFac :: Expr
-hFac = (Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (BinOp OpMul (Var "n") (App (Var "fac") (BinOp OpSub (Var "n") (Lit $ LInt 1))))))
-
-omega :: Expr
-omega = App (Lam "x" (App (Var "x") (Var "x")))
-            (Lam "x" (App (Var "x") (Var "x")))
-
-testing :: ValMap
-testing = Map.fromList [
-    ("f", VFixed "f" [
-        ("f", Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 0) (App (Var "g") (BinOp OpSub (Var "n") (Lit $ LInt 1))))),
-        ("g", Lam "n" (If (BinOp OpEq (Var "n") (Lit $ LInt 0)) (Lit $ LInt 1) (App (Var "f") (BinOp OpSub (Var "n") (Lit $ LInt 1)))))
-    ] Map.empty)]
+checkBinOpType :: Expr -> Expr -> Type -> TypeReader
+checkBinOpType e1 e2 t = do
+    t1 <- checkType e1 t
+    checkType e2 t

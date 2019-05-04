@@ -8,6 +8,7 @@ import Interpreter
 
 import ErrM
 
+import Control.Monad (unless)
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
@@ -18,6 +19,7 @@ import System.Console.Haskeline
 import qualified Data.Map as Map
 
 import Lambda.Lambda hiding (Expr(..))
+import Types
 
 title :: [String]
 title = 
@@ -36,14 +38,14 @@ myLLexer = resolveLayout True . myLexer
 eitherFunc :: Either String InterRes -> IState [String]
 eitherFunc (Left err) = return [err]
 eitherFunc (Right (InterType tn l)) = 
-    return ["type " ++ tn ++ " = " ++ (intercalate " | " $ map showType l)]
+    return ["type " ++ tn ++ " = " ++ intercalate " | " (map showType l)]
     where
-        showType (name, tlist) = name ++ " " ++  (unwords $ map show tlist)
+        showType (name, tlist) = name ++ " " ++ unwords (map show tlist)
 eitherFunc (Right (InterVal l)) = return $ map showVal l
     where
-        showVal val = case val of
-            VInt i -> show i ++ " : int"
-            VBool b -> show b ++ " : bool"
+        showVal (val, t) = case val of
+            VInt i -> show i ++ " : " ++ show t
+            VBool b -> show b ++ " : " ++ show t
             VClos n _ _ -> n ++ " = <fun>"
             VFixed n _ _ -> n ++ " = <fun>"
             VCons v1 VNil -> "[" ++ showLeftList v1 ++ "] : list"
@@ -52,13 +54,15 @@ eitherFunc (Right (InterVal l)) = return $ map showVal l
             VAlg cname tname lv -> 
                 cname ++ " " ++ showList lv ++ " : " ++ tname
                 where
-                    showList l = if length l <= 0 then "" 
-                        else "(" ++ (intercalate ", " $ map showVal lv) ++ ")"
+                    showList l =
+                        let lv' = map (\n -> (n, Types.TInt)) l 
+                        in if length l <= 0 then "" 
+                        else "(" ++ intercalate ", " (map showVal lv') ++ ")"
         showLeftList v = case v of
             VInt i -> show i
             VBool b -> show b
-            VClos _ _ _ -> "<fun>"
-            VFixed _ _ _ -> "<fun>"
+            VClos {} -> "<fun>"
+            VFixed {} -> "<fun>"
             VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
             VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
             VNil -> "[]"
@@ -71,7 +75,7 @@ process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
     case res of
-        (Bad s) -> if null line then return () else liftIO $ putStrLn "err"
+        (Bad s) -> unless (null line) $ liftIO $ putStrLn "err"
         (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
         -- (Ok s) -> print $ map eitherFunc (interpretLine s)
         

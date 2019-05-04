@@ -79,14 +79,17 @@ EOr.        Expr     ::= Expr1 "or" Expr ;
 ECond.      Expr     ::= "if" Expr "then" Expr "else" Expr ;
 ELetIn.     Expr     ::= LetDef "in" Expr ; 
 EMatch.     Expr     ::= "match" VIdent "with" "{" [Matching] "}" ;
-ELambda.    Expr     ::= "\\" [VIdent] "->" Expr ;
+ELambda.    Expr     ::= "\\" [LambdaVI] "->" Expr ;
 
 EList.      Expr     ::= "[" [Expr] "]" ;
 ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
 
+TypedVId.   LambdaVI ::= "(" VIdent ":" Type ")" ;
+LambdaVId.  LambdaVI ::= VIdent ;
+
 separator nonempty Expr "," ;
 separator nonempty Matching ";" ;
-separator nonempty VIdent "," ;
+separator nonempty LambdaVI "," ;
 coercions Expr 9 ;
 
 MatchCase.  Matching ::= "case" CasePat "->" Expr ;

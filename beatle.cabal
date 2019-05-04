@@ -16,8 +16,6 @@ build-type:     Simple
 extra-source-files:
     README.md
     ChangeLog.md
-    src/ParBeatle.y
-    src/LexBeatle.x
 
 library
   exposed-modules:

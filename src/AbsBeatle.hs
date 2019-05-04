@@ -80,9 +80,12 @@ data Expr
     | ECond Expr Expr Expr
     | ELetIn LetDef Expr
     | EMatch VIdent [Matching]
-    | ELambda [VIdent] Expr
+    | ELambda [LambdaVI] Expr
     | EList [Expr]
     | ETypeCons TIdent [Expr]
+  deriving (Eq, Ord, Show, Read)
+
+data LambdaVI = TypedVId VIdent Type | LambdaVId VIdent
   deriving (Eq, Ord, Show, Read)
 
 data Matching = MatchCase CasePat Expr
