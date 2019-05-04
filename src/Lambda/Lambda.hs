@@ -20,6 +20,7 @@ import Control.Monad.Reader
 import Control.Monad.Except
 
 import qualified Data.Map as Map
+import Data.List (intercalate)
 
 import Types
 import Utils
@@ -37,17 +38,13 @@ data Expr = Var Name
           | UnOp UnOp Expr
           | Cons Expr Expr
           | AlgCons Name [Expr]
-          deriving (Show)
 
 data Lit = LInt Integer
          | LBool Bool
          | LNil
-         deriving (Show)
 
 data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
-    deriving (Show)
 data UnOp = OpNeg | OpNot
-    deriving (Show)
 
 data Value = VInt Integer 
            | VBool Bool 
@@ -284,3 +281,44 @@ checkBinOpType :: Expr -> Expr -> Type -> TypeReader
 checkBinOpType e1 e2 t = do
     t1 <- checkType e1 t
     checkType e2 t
+
+
+----- SHOW INSTANCES -----
+instance Show Expr where
+    show (Var n) = n
+    show (Lam n t e) = "λ(" ++ n ++ " : " ++ show t ++ ") -> " ++ show e
+    show (Lit l) = show l
+    show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
+    show (Let n e1 e2) = "let " ++ n ++ " = " ++ show e1 ++ " in " ++ show e2
+    show (LetRec l e) = 
+        "letrec " ++ 
+        intercalate " also " (map (\(n, _, e') -> n ++ " = " ++ show e') l) ++
+        " in " ++ show e
+    show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
+        " else " ++ show e2
+    show (BinOp op e1 e2) = show e1 ++ " " ++ show op ++ " " ++ show e2
+    show (UnOp op e) = show op ++ " " ++ show e
+    show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
+    show (AlgCons n le) = n ++ " of (" ++ intercalate ", " (map show le) ++ ")"
+
+instance Show Lit where
+    show lit = case lit of
+        LInt i  -> show i
+        LBool b -> show b
+        LNil    -> "[]"
+
+instance Show BinOp where
+    show op = case op of
+        OpAdd -> "+"
+        OpMul -> "*"
+        OpSub -> "-"
+        OpDiv -> "/"
+        OpAnd -> "and"
+        OpOr  -> "or"
+        OpEq  -> "=="
+        OpLT  -> "<"
+
+instance Show UnOp where
+    show op = case op of
+        OpNeg -> "-"
+        OpNot -> "not"
