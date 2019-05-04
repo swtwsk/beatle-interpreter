@@ -8,7 +8,7 @@ module Lambda.Lambda (
     TypeDef(..),
     ValMap,
     ConsMap,
-    TypeMap,
+    AlgTypeMap,
     Env(..),
     eval,
     fixed,
@@ -30,7 +30,7 @@ data Expr = Var Name
           | Lit Lit
           | App Expr Expr
           | Let Name Expr Expr
-          | LetRec [(Name, Expr)] Expr
+          | LetRec [(Name, Type, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
@@ -62,29 +62,37 @@ data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
 type ValMap = Map.Map Name Value
 type TypeName = String
 type ConsMap = Map.Map Name (Int, TypeName)
-type TypeMap = Map.Map TypeName TypeDef
+type AlgTypeMap = Map.Map TypeName TypeDef
+type TypeMap = Map.Map TypeName Type
 
 data Env = Env 
-    { values :: ValMap
-    , constructors :: ConsMap
-    , algtypes  :: TypeMap }
+    { _values :: ValMap
+    , _constructors :: ConsMap
+    , _algtypes  :: AlgTypeMap
+    , _types :: TypeMap }
 
-type TypeReader = ReaderT (Map.Map Name Type) (Except String) Type
+type TypeReader = ReaderT TypeMap (Except String) Type
 
 emptyEnv :: Env
-emptyEnv = Env { values = Map.empty
-               , constructors = Map.empty
-               , algtypes = Map.empty }
+emptyEnv = Env { _values = Map.empty
+               , _constructors = Map.empty
+               , _algtypes = Map.empty
+               , _types = Map.empty }
 
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: ValMap -> [(Name, Expr)] -> [(Name, (Value, Type))]
-fixed env l = map (\(n, _) -> (n, (VFixed n l env, TInt))) l
+fixed :: ValMap -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
+fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
+    where l' = map (\(n, _, e) -> (n, e)) l
+
+-- fixed :: ValMap -> [(Name, (Expr, Type))] -> [(Name, (Value, Type))]
+-- fixed env l = map (\(n, (_, t)) -> (n, (VFixed n l' env, t))) l
+--     where l' = map (\(n, (e, _)) -> (n, e)) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
-eval map expr = do
-    typed <- runExcept (runReaderT (typeOf expr) Map.empty)
-    evaled <- runExcept (runReaderT (eval' expr) map)
+eval env expr = do
+    typed <- runExcept (runReaderT (typeOf expr) (_types env))
+    evaled <- runExcept (runReaderT (eval' expr) env)
     return (evaled, typed)
 
 eval' :: Expr -> EvalReader
@@ -95,33 +103,33 @@ eval' (Lit l) = case l of
 
 eval' (Var var) = do
     env <- ask
-    let vmap = values env
+    let vmap = _values env
     maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var vmap)
 
 eval' (Lam n t e) = do
     env <- ask
-    let vmap = values env
+    let vmap = _values env
     return (VClos n e vmap)
 
 eval' (Let n e1 e2) = do
     env <- ask
-    let vmap = values env
+    let vmap = _values env
     eval1 <- either fail return $ eval env e1
     let (eval1', _) = eval1
     let nmap = Map.insert n eval1' vmap
     either throwError return $ ev (Map.union nmap vmap) env
     where
         ev :: ValMap -> Env -> Either String Value
-        ev vmap env = runExcept (runReaderT (eval' e2) (env {values=vmap}))
+        ev vmap env = runExcept (runReaderT (eval' e2) (env {_values=vmap}))
 
 eval' (LetRec l e) = do
     env <- ask
-    let vmap = values env
-    let nmap = Map.fromList $ map (\(n, (v, t)) -> (n, v)) $ fixed vmap l
+    let vmap = _values env
+    let nmap = Map.fromList $ map (\(n, (v, _)) -> (n, v)) $ fixed vmap l
     either throwError return $ ev (Map.union nmap vmap) env
     where
         ev :: ValMap -> Env -> Either String Value
-        ev vmap env = runExcept (runReaderT (eval' e) (env {values=vmap}))
+        ev vmap env = runExcept (runReaderT (eval' e) (env {_values=vmap}))
 
 eval' (App e1 e2) = do
     env <- ask
@@ -130,9 +138,9 @@ eval' (App e1 e2) = do
     either throwError return $ apply eval1 eval2 env
     where
         apply (VClos x e1 vmap) e2 env =
-            runExcept (runReaderT (eval' e1) (env {values=Map.insert x e2 vmap}))
+            runExcept (runReaderT (eval' e1) (env {_values=Map.insert x e2 vmap}))
         apply (VFixed fn l vmap) e2 env = case found of
-            (_, Lam x _ e1):_ -> runExcept (runReaderT (eval' e1) (env {values=nmap x}))
+            (_, Lam x _ e1):_ -> runExcept (runReaderT (eval' e1) (env {_values=nmap x}))
             _ -> throwError "Expression is not a function; it cannot be applied"
             where
                 found = filter (\(n, _) -> n == fn) l
@@ -188,7 +196,7 @@ eval' (Cons e1 e2) = do
 
 eval' (AlgCons cname le) = do
     env <- ask
-    let cmap = constructors env
+    let cmap = _constructors env
     c <- maybe (throwError $ "Unbound constructor " ++ cname) return $
          Map.lookup cname cmap
     let (count, tname) = c

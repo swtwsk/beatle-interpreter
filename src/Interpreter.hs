@@ -13,19 +13,19 @@ import Utils
 
 import Lambda.Lambda hiding (Expr(..), TypeDef(..))
 import qualified Lambda.Lambda as L
-import qualified Types
+import qualified Types as T
 
 type OldResult = Err String
 
-data InterRes = InterVal [(Value, Types.Type)]
-              | InterType Name [(Name, [Types.Type])]
+data InterRes = InterVal [(Value, T.Type)]
+              | InterType Name [(Name, [T.Type])]
 
 type TransRes = Either String
 type Result = TransRes InterRes
 
 type IState = StateT L.Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(Name, L.Expr)] | Rec [(Name, L.Expr)]
+data Fun = Fun [(Name, T.Type, L.Expr)] | Rec [(Name, T.Type, L.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -40,26 +40,28 @@ interpretPhrase (Expression e) = do
     return $ either Left (\n -> return $ InterVal [n]) $ ev
 interpretPhrase (Value letdef) = do
     env <- get
-    let vmap = values env
+    let vmap = _values env
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
         Fun list -> either throwError return $ seqPair $ map (ev env) list
         Rec list -> return $ L.fixed vmap list
-    let m' = map (\(n, (v, t)) -> (n, v)) m
-    put $ env { values = Map.union (Map.fromList m') vmap }
+    let m' = map (\(n, (v, _)) -> (n, v)) m
+    let t' = map (\(n, (_, t)) -> (n, t)) m
+    put $ env { _values = Map.union (Map.fromList m') vmap
+              , _types  = Map.union (Map.fromList t') (_types env) }
     extr <- return $ map extract m
     return . pure . InterVal $ extr
     where
-        ev env (name, expr) = (name, eval env expr)
+        ev env (name, _, expr) = (name, eval env expr)
         extract (_, expr) = expr
 interpretPhrase (TypeDecl typedef) = do
     env <- get
     ttd <- either throwError return $ translateTypeDef typedef
     let (tname, tdef) = ttd
-    let tmap = Map.insert tname tdef $ algtypes env
+    let tmap = Map.insert tname tdef $ _algtypes env
     let cons = map (\(n, t) -> (n, (length t, tname))) $ L.consdef tdef
-    let cmap = Map.union (Map.fromList cons) (constructors env)
-    put $ env { constructors = cmap, algtypes = tmap }
+    let cmap = Map.union (Map.fromList cons) (_constructors env)
+    put $ env { _constructors = cmap, _algtypes = tmap }
     return . pure $ InterType tname (L.consdef tdef)
 
 translateExpr :: Expr -> TransRes L.Expr
@@ -147,7 +149,7 @@ translateExpr (ELetIn letdef e) = do
         Rec list -> pure $ L.LetRec list te
     where
         transLambda l e = case l of
-            (n, fe):t -> L.Let n fe (transLambda t e)
+            (n, _, fe):t -> L.Let n fe (transLambda t e)
             [] -> e
 
 translateExpr (EMatch (VIdent n) matchList) =
@@ -160,7 +162,7 @@ translateExpr (ELambda vlist e) = do
             (TypedVId (VIdent n) typ):t -> 
                 L.Lam n (translateType typ) (transLambda t e)
             -- STUPID PLACEHOLDER
-            (LambdaVId (VIdent n)):t -> L.Lam n Types.TInt (transLambda t e)
+            (LambdaVId (VIdent n)):t -> L.Lam n T.TInt (transLambda t e)
             [] -> e
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
@@ -179,28 +181,31 @@ translateLetDef ld = case ld of
     Let letbinds -> either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
     LetRec letbinds -> either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (String, L.Expr)
+translateLetBind :: LetBind -> TransRes (String, T.Type, L.Expr)
 translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
-    let (n, _) = tp
+    let (n, t) = tp
     te <- translateExpr e
-    pure (n, te)
+    pure (n, t, te)
 -- TODO: read rt
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     let mappedpl = map translatePattern pl
     tpl <- sequence mappedpl
     te <- translateExpr e
-    pure (proc, transLambda tpl te)
+    trt <- case translateRetType rt of
+        Nothing -> Left "function return type not specified"
+        Just trt' -> pure trt'
+    pure (proc, trt, transLambda tpl te)
     where
         transLambda l e = case l of
             (n, typ):t  -> L.Lam n typ (transLambda t e)
             [] -> e
 
 -- TODO: This is totally not how it should be
-translatePattern :: Pattern -> TransRes (String, Types.Type)
-translatePattern (PId (VIdent n)) = Left "unimplemented"
+translatePattern :: Pattern -> TransRes (String, T.Type)
+translatePattern (PId (VIdent n)) = Left "Pattern: VIdent unimplemented"
 translatePattern (PTyped (PId (VIdent n)) t) = pure (n, translateType t)
-translatePattern _ = Left "unimplemented"
+translatePattern _ = Left "Pattern: unimplemented"
 
 translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
@@ -208,15 +213,19 @@ translateTypeDef (TDef (TIdent t) polys ltcons) = do
     tl <- sequence $ map translateTypeCons ltcons
     return $ (t, L.TypeDef { L.polynames = mpolys, L.consdef = tl })
 
-translateTypeCons :: TypeCons -> TransRes (Name, [Types.Type])
+translateTypeCons :: TypeCons -> TransRes (Name, [T.Type])
 translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
 
-translateType :: Type -> Types.Type
-translateType TInt = Types.TInt
-translateType TBool = Types.TBool
-translateType (TAlgebraic (TIdent t)) = Types.TAlg t
-translateType (TPoly (TPolyIdent t)) = Types.TPoly t
-translateType (TFun t1 t2) = Types.TFun (translateType t1) (translateType t2)
+translateType :: Type -> T.Type
+translateType TInt = T.TInt
+translateType TBool = T.TBool
+translateType (TAlgebraic (TIdent t)) = T.TAlg t
+translateType (TPoly (TPolyIdent t)) = T.TPoly t
+translateType (TFun t1 t2) = T.TFun (translateType t1) (translateType t2)
+
+translateRetType :: RType -> Maybe T.Type
+translateRetType NoRetType = Nothing
+translateRetType (RetType t) = pure $ translateType t
 
 failure :: Show a => a -> OldResult
 failure x = Bad $ "Undefined case: " ++ show x
