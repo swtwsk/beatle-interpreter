@@ -226,6 +226,7 @@ translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
 translateType :: Type -> T.Type
 translateType TInt = T.TInt
 translateType TBool = T.TBool
+translateType (TList t) = T.TList $ translateType t
 translateType (TAlgebraic (TIdent t)) = T.TAlg t
 translateType (TPoly (TPolyIdent t)) = T.TPoly t
 translateType (TFun t1 t2) = T.TFun (translateType t1) (translateType t2)

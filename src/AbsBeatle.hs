@@ -59,6 +59,7 @@ data Expr
     | EFalse
     | EListEmpty
     | ETypeAlg TIdent
+    | EList [Expr]
     | EApp Expr Expr
     | ETyped Expr Type
     | ENeg Expr
@@ -81,7 +82,6 @@ data Expr
     | ELetIn LetDef Expr
     | EMatch VIdent [Matching]
     | ELambda [LambdaVI] Expr
-    | EList [Expr]
     | ETypeCons TIdent [Expr]
   deriving (Eq, Ord, Show, Read)
 
@@ -103,6 +103,7 @@ data TypeCons = TCons TIdent [Type]
 data Type
     = TInt
     | TBool
+    | TList Type
     | TAlgebraic TIdent
     | TPoly TPolyIdent
     | TFun Type Type

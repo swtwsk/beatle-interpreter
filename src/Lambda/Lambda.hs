@@ -267,7 +267,12 @@ typeOf (BinOp op e1 e2) = case op of
 typeOf (UnOp op e) = case op of
     OpNeg -> checkType e TInt
     OpNot -> checkType e TBool
-typeOf (Cons e1 e2) = throwError "Type: list cons unimplemented"
+typeOf (Cons e1 e2) = do
+    t1 <- typeOf e1
+    let listType = TList t1
+    case e2 of
+        Lit (LNil) -> return listType
+        _ -> checkType e2 listType
 typeOf (AlgCons cname le) = throwError "Type: algcons unimplemented"
 
 checkType :: Expr -> Type -> TypeReader

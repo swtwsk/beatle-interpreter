@@ -174,6 +174,7 @@ instance Print Expr where
     EFalse -> prPrec i 9 (concatD [doc (showString "False")])
     EListEmpty -> prPrec i 9 (concatD [doc (showString "[]")])
     ETypeAlg tident -> prPrec i 9 (concatD [prt 0 tident])
+    EList exprs -> prPrec i 9 (concatD [doc (showString "["), prt 0 exprs, doc (showString "]")])
     EApp expr1 expr2 -> prPrec i 8 (concatD [prt 8 expr1, prt 9 expr2])
     ETyped expr type_ -> prPrec i 7 (concatD [doc (showString "("), prt 0 expr, doc (showString ":"), prt 0 type_, doc (showString ")")])
     ENeg expr -> prPrec i 6 (concatD [doc (showString "-"), prt 7 expr])
@@ -196,7 +197,6 @@ instance Print Expr where
     ELetIn letdef expr -> prPrec i 0 (concatD [prt 0 letdef, doc (showString "in"), prt 0 expr])
     EMatch vident matchings -> prPrec i 0 (concatD [doc (showString "match"), prt 0 vident, doc (showString "with"), doc (showString "{"), prt 0 matchings, doc (showString "}")])
     ELambda lambdavis expr -> prPrec i 0 (concatD [doc (showString "\\"), prt 0 lambdavis, doc (showString "->"), prt 0 expr])
-    EList exprs -> prPrec i 0 (concatD [doc (showString "["), prt 0 exprs, doc (showString "]")])
     ETypeCons tident exprs -> prPrec i 0 (concatD [prt 0 tident, doc (showString "of"), doc (showString "("), prt 0 exprs, doc (showString ")")])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
@@ -250,6 +250,7 @@ instance Print Type where
   prt i e = case e of
     TInt -> prPrec i 1 (concatD [doc (showString "Int")])
     TBool -> prPrec i 1 (concatD [doc (showString "Bool")])
+    TList type_ -> prPrec i 1 (concatD [doc (showString "["), prt 0 type_, doc (showString "]")])
     TAlgebraic tident -> prPrec i 1 (concatD [prt 0 tident])
     TPoly tpolyident -> prPrec i 1 (concatD [prt 0 tpolyident])
     TFun type_1 type_2 -> prPrec i 0 (concatD [prt 1 type_1, doc (showString "->"), prt 0 type_2])

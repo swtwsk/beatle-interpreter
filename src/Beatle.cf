@@ -53,6 +53,7 @@ ETrue.      Expr9    ::= "True" ;
 EFalse.     Expr9    ::= "False" ;
 EListEmpty. Expr9    ::= "[]" ;
 ETypeAlg.   Expr9    ::= TIdent ;
+EList.      Expr9    ::= "[" [Expr] "]" ;
 
 EApp.       Expr8    ::= Expr8 Expr9 ;
 ETyped.     Expr7    ::= "(" Expr ":" Type ")" ;
@@ -81,7 +82,6 @@ ELetIn.     Expr     ::= LetDef "in" Expr ;
 EMatch.     Expr     ::= "match" VIdent "with" "{" [Matching] "}" ;
 ELambda.    Expr     ::= "\\" [LambdaVI] "->" Expr ;
 
-EList.      Expr     ::= "[" [Expr] "]" ;
 ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
 
 TypedVId.   LambdaVI ::= "(" VIdent ":" Type ")" ;
@@ -104,6 +104,7 @@ separator Type "" ;
 
 TInt.       Type1    ::= "Int" ;
 TBool.      Type1    ::= "Bool" ;
+TList.      Type1    ::= "[" Type "]" ;
 TAlgebraic. Type1    ::= TIdent ;
 TPoly.      Type1    ::= TPolyIdent ;
 TFun.       Type     ::= Type1 "->" Type ;

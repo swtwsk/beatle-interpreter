@@ -48,9 +48,11 @@ eitherFunc (Right (InterVal l)) = return $ map showVal l
             VBool b -> "- : " ++ show t ++ " = " ++ show b
             VClos n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
             VFixed n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
-            VCons v1 VNil -> "[" ++ showLeftList v1 ++ "] : list"
-            VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "] : list"
-            VNil -> "[] : list"
+            VCons v1 VNil -> 
+                "- : " ++ show t ++ " = [" ++ showLeftList v1 ++ "]"
+            VCons v1 v2 -> "- : " ++ show t ++ " = [" ++ showLeftList v1 ++ 
+                ", " ++ showRightList v2 ++ "]"
+            VNil -> "- : " ++ show t ++ "= []"
             VAlg cname tname lv -> 
                 cname ++ " " ++ showList lv ++ " : " ++ tname
                 where
@@ -75,7 +77,7 @@ process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
     case res of
-        (Bad s) -> unless (null line) $ liftIO $ putStrLn "err"
+        (Bad s) -> unless (null line) $ liftIO $ putStrLn $ "err: " ++ s
         (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
         -- (Ok s) -> print $ map eitherFunc (interpretLine s)
         
