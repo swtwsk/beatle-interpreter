@@ -17,11 +17,13 @@ module Lambda (
     emptyEnv
 ) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Except
 
 import qualified Data.Map as Map
 import Data.List (intercalate)
+import qualified Data.List as List
 
 import Types
 import Utils
@@ -283,7 +285,21 @@ typeOf (Cons e1 e2) = do
     case e2 of
         Lit LNil -> return listType
         _ -> checkType e2 listType
-typeOf (AlgCons cname le) = throwError "Type: algcons unimplemented"
+typeOf (AlgCons cname le) = do
+    env <- ask
+    c <- maybe (throwError $ "Unbound constructor " ++ cname) return $
+        Map.lookup cname $ _constructors env
+    let (_, typename) = c
+    algtype <- case Map.lookup typename $ _algtypes env of
+        Nothing -> throwError $ "Unknown type " ++ typename 
+            ++ " of constructor " ++ cname
+        Just a -> return a
+    types <- case List.lookup cname $ consdef algtype of
+        Nothing -> throwError $ "Constructor " ++ cname 
+            ++ " was said to be of type " ++ typename ++ " but is not"
+        Just tlist -> return tlist
+    _ <- zipWithM_ checkType le types
+    return $ TAlg typename
 
 checkType :: Expr -> Type -> TypeReader
 checkType e t = do
@@ -302,14 +318,15 @@ instance Show Expr where
     show (Let n e1 e2) = "let " ++ n ++ " = " ++ show e1 ++ " in " ++ show e2
     show (LetRec l e) = 
         "letrec " ++ 
-        intercalate " also " (map (\(n, _, e') -> n ++ " = " ++ show e') l) ++
-        " in " ++ show e
+        List.intercalate " also " (map (\(n, _, e') -> n ++ " = " 
+        ++ show e') l) ++ " in " ++ show e
     show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
         " else " ++ show e2
     show (BinOp op e1 e2) = show e1 ++ " " ++ show op ++ " " ++ show e2
     show (UnOp op e) = show op ++ " " ++ show e
     show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
-    show (AlgCons n le) = n ++ " of (" ++ intercalate ", " (map show le) ++ ")"
+    show (AlgCons n le) = n ++ " of (" ++ List.intercalate ", " (map show le) 
+        ++ ")"
 
 instance Show Lit where
     show lit = case lit of
