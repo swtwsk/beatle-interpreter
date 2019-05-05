@@ -43,11 +43,14 @@ interpretPhrase (Value letdef) = do
     let vmap = _values env
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
-        Fun list -> either throwError return $ seqPair $ map (ev env) list
+        Fun list -> do
+            _ <- either throwError return $
+                mapM (\(_, t, e') -> typeEqualCheck (_types env) e' t) list
+            either throwError return $ seqPair $ map (ev env) list
         Rec list -> do
             let tmap  = Map.fromList $ map (\(n, t, _) -> (n, t)) list
                 tmap' = Map.union tmap (_types env)
-            tl <- either throwError return $ 
+            _ <- either throwError return $ 
                 mapM (\(_, _, e') -> typeCheck tmap' e') list
             return $ L.fixed vmap list
     let m' = map (\(n, (v, _)) -> (n, v)) m

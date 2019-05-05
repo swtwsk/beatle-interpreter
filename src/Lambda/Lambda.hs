@@ -12,6 +12,7 @@ module Lambda.Lambda (
     Env(..),
     eval,
     typeCheck,
+    typeEqualCheck,
     fixed,
     emptyEnv
 ) where
@@ -90,11 +91,14 @@ fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
     typed <- typeCheck (_types env) expr
-    evaled <- runExcept (runReaderT (eval' expr) env)
+    evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
 typeCheck :: TypeMap -> Expr -> Either String Type
-typeCheck tmap expr = runExcept (runReaderT (typeOf expr) tmap)
+typeCheck tmap expr = runExcept $ runReaderT (typeOf expr) tmap
+
+typeEqualCheck :: TypeMap -> Expr -> Type -> Either String Type
+typeEqualCheck tmap expr t = runExcept $ runReaderT (checkType expr t) tmap
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -271,7 +275,7 @@ typeOf (Cons e1 e2) = do
     t1 <- typeOf e1
     let listType = TList t1
     case e2 of
-        Lit (LNil) -> return listType
+        Lit LNil -> return listType
         _ -> checkType e2 listType
 typeOf (AlgCons cname le) = throwError "Type: algcons unimplemented"
 
