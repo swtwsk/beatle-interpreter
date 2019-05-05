@@ -11,8 +11,8 @@ import AbsBeatle
 import ErrM
 import Utils
 
-import Lambda.Lambda hiding (Expr(..), TypeDef(..))
-import qualified Lambda.Lambda as L
+import Lambda hiding (Expr(..), TypeDef(..))
+import qualified Lambda as L
 import qualified Types as T
 
 type OldResult = Err String

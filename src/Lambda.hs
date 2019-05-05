@@ -1,4 +1,4 @@
-module Lambda.Lambda (
+module Lambda (
     Name,
     Expr(..),
     Lit(..),
@@ -83,10 +83,6 @@ type EvalReader = ReaderT Env (Except String) Value
 fixed :: ValMap -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
 fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
     where l' = map (\(n, _, e) -> (n, e)) l
-
--- fixed :: ValMap -> [(Name, (Expr, Type))] -> [(Name, (Value, Type))]
--- fixed env l = map (\(n, (_, t)) -> (n, (VFixed n l' env, t))) l
---     where l' = map (\(n, (e, _)) -> (n, e)) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
@@ -268,6 +264,10 @@ typeOf (BinOp op e1 e2) = case op of
     OpEq  -> 
         (checkBinOpType e1 e2 TInt >> return TBool) `catchError` (\_ -> checkBinOpType e1 e2 TBool)
     OpLT  -> checkBinOpType e1 e2 TInt
+    where
+        checkBinOpType :: Expr -> Expr -> Type -> TypeReader
+        checkBinOpType e1 e2 t = checkType e1 t >> checkType e2 t           
+
 typeOf (UnOp op e) = case op of
     OpNeg -> checkType e TInt
     OpNot -> checkType e TBool
@@ -285,11 +285,6 @@ checkType e t = do
     if t == t' then return t 
     else throwError $ "Type error: " ++ show e ++ " should be " ++ show t 
         ++ " but is of type " ++ show t'
-
-checkBinOpType :: Expr -> Expr -> Type -> TypeReader
-checkBinOpType e1 e2 t = do
-    t1 <- checkType e1 t
-    checkType e2 t
 
 
 ----- SHOW INSTANCES -----

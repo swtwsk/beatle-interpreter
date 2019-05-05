@@ -18,7 +18,7 @@ import System.Console.Haskeline
 
 import qualified Data.Map as Map
 
-import Lambda.Lambda hiding (Expr(..))
+import Lambda hiding (Expr(..))
 import Types
 
 title :: [String]
