@@ -70,14 +70,13 @@ data Env = Env
     , _algtypes  :: AlgTypeMap
     , _types :: TypeMap }
 
-type TypeReader = ReaderT TypeMap (Except String) Type
-
 emptyEnv :: Env
 emptyEnv = Env { _values = Map.empty
                , _constructors = Map.empty
                , _algtypes = Map.empty
                , _types = Map.empty }
 
+type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
 
 fixed :: ValMap -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
@@ -86,15 +85,15 @@ fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
-    typed <- typeCheck (_types env) expr
+    typed <- typeCheck env expr
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
-typeCheck :: TypeMap -> Expr -> Either String Type
-typeCheck tmap expr = runExcept $ runReaderT (typeOf expr) tmap
+typeCheck :: Env -> Expr -> Either String Type
+typeCheck env expr = runExcept $ runReaderT (typeOf expr) env
 
-typeEqualCheck :: TypeMap -> Expr -> Type -> Either String Type
-typeEqualCheck tmap expr t = runExcept $ runReaderT (checkType expr t) tmap
+typeEqualCheck :: Env -> Expr -> Type -> Either String Type
+typeEqualCheck env expr t = runExcept $ runReaderT (checkType expr t) env
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -227,12 +226,15 @@ typeOf (Lit l) = case l of
     LBool b -> return TBool
     LNil -> throwError "Type: list type unimplemented"
 typeOf (Var var) = do
-    tenv <- ask
+    env <- ask
+    let tenv = _types env
     case Map.lookup var tenv of
         Nothing -> throwError $ "Type: Unbound value " ++ var
         Just t -> return t
 typeOf (Lam n t0 e) = do
-    t1 <- local (Map.insert n t0) (typeOf e)
+    env <- ask
+    let ntenv = Map.insert n t0 $ _types env
+    t1 <- local (\env -> env {_types = ntenv}) (typeOf e)
     return $ TFun t0 t1
 typeOf (App e1 e2) = do
     t1 <- typeOf e1
@@ -241,11 +243,15 @@ typeOf (App e1 e2) = do
         _ -> throwError $ "Type error: " ++ show e1 ++ " is of type " ++ show t1
 typeOf (Let n e1 e2) = do
     t1 <- typeOf e1
-    local (Map.insert n t1) (typeOf e2)
+    env <- ask
+    let ntenv = Map.insert n t1 $ _types env
+    local (\env -> env {_types = ntenv}) (typeOf e2)
 typeOf (LetRec l e) = do
-    tl <- mapM (\(_, _, e') -> local (Map.union tmap) (typeOf e')) l
+    env <- ask
+    let nte = Map.union tmap $ _types env
+    tl <- mapM (\(_, _, e') -> local (\env -> env {_types = nte}) (typeOf e')) l
     let typeMap = Map.fromList $ zip nlist tl
-    local (Map.union typeMap) (typeOf e)
+    local (\env -> env {_types = typeMap}) (typeOf e)
     where
         tlist = map (\(n, t, _) -> (n, t)) l
         tmap  = Map.fromList tlist
