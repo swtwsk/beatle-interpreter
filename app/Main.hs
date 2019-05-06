@@ -43,35 +43,7 @@ eitherFunc (Right (InterType tn l)) =
         showType (name, tlist) = name ++ " " ++ unwords (map show tlist)
 eitherFunc (Right (InterVal l)) = return $ map showVal l
     where
-        showVal (val, t) = case val of
-            VInt i -> "- : " ++ show t ++ " = " ++ show i
-            VBool b -> "- : " ++ show t ++ " = " ++ show b
-            VClos n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
-            VFixed n _ _ -> n ++ " : " ++ show t ++ " = <fun>"
-            VCons v1 VNil -> 
-                "- : " ++ show t ++ " = [" ++ showLeftList v1 ++ "]"
-            VCons v1 v2 -> "- : " ++ show t ++ " = [" ++ showLeftList v1 ++ 
-                ", " ++ showRightList v2 ++ "]"
-            VNil -> "- : " ++ show t ++ "= []"
-            VAlg cname tname lv -> 
-                cname ++ " " ++ showList lv ++ " : " ++ tname
-                where
-                    showList l =
-                        let lv' = map (\n -> (n, Types.TInt)) l 
-                        in if length l <= 0 then "" 
-                        else "(" ++ intercalate ", " (map showVal lv') ++ ")"
-        showLeftList v = case v of
-            VInt i -> show i
-            VBool b -> show b
-            VClos {} -> "<fun>"
-            VFixed {} -> "<fun>"
-            VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
-            VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
-            VNil -> "[]"
-        showRightList v = case v of
-            VCons v1 VNil -> showLeftList v1
-            VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
-            VNil -> ""
+        showVal (val, t) = "- : " ++ show t ++ " = " ++ show val
 
 process :: String -> IState ()
 process line = do
@@ -93,7 +65,8 @@ run = runInputT defaultSettings (runExceptT $ runStateT loop emptyEnv) >>= rerun
                 Just input -> process input >> loop
 
 rerun :: IO () -> Either String b -> IO ()
-rerun f (Left err) = putStrLn ("Error: " ++ err) >> f
+rerun f (Left err) = putStrLn ("Fatal error: " ++ err) 
+    >> putStrLn "Restarting interpreter" >> f
 rerun _ (Right _) = return ()
 
 main :: IO ()

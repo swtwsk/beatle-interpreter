@@ -53,7 +53,7 @@ interpretPhrase (Value letdef) = do
                 env'  = env { _types = tmap' }
             _ <- either throwError return $ 
                 mapM (\(_, _, e') -> typeCheck env' e') list
-            return $ L.fixed vmap list
+            return $ L.fixed env list
     let m' = map (\(n, (v, _)) -> (n, v)) m
     let t' = map (\(n, (_, t)) -> (n, t)) m
     put $ env { _values = Map.union (Map.fromList m') vmap

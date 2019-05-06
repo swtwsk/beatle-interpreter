@@ -51,12 +51,11 @@ data UnOp = OpNeg | OpNot
 
 data Value = VInt Integer 
            | VBool Bool 
-           | VClos Name Expr ValMap
-           | VFixed Name [(Name, Expr)] ValMap
+           | VClos Name Expr Env
+           | VFixed Name [(Name, Expr)] Env
            | VCons Value Value
            | VNil
            | VAlg Name TypeName [Value]
-    deriving (Show)
 
 data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
 
@@ -78,10 +77,17 @@ emptyEnv = Env { _values = Map.empty
                , _algtypes = Map.empty
                , _types = Map.empty }
 
+mergeEnv :: Env -> Env -> Env
+mergeEnv env1 env2 =
+    Env { _values = Map.union (_values env1) (_values env2) 
+        , _constructors = Map.union (_constructors env1) (_constructors env2)
+        , _algtypes = Map.union (_algtypes env1) (_algtypes env2) 
+        , _types = Map.union (_types env1) (_types env2) }
+
 type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: ValMap -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
+fixed :: Env -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
 fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
     where l' = map (\(n, _, e) -> (n, e)) l
 
@@ -110,8 +116,7 @@ eval' (Var var) = do
 
 eval' (Lam n t e) = do
     env <- ask
-    let vmap = _values env
-    return (VClos n e vmap)
+    return (VClos n e env)
 
 eval' (Let n e1 e2) = do
     env <- ask
@@ -127,11 +132,11 @@ eval' (Let n e1 e2) = do
 eval' (LetRec l e) = do
     env <- ask
     let vmap = _values env
-    let nmap = Map.fromList $ map (\(n, (v, _)) -> (n, v)) $ fixed vmap l
-    either throwError return $ ev (Map.union nmap vmap) env
+    let nmap = Map.fromList $ map (\(n, (v, _)) -> (n, v)) $ fixed env l
+    either throwError return $ ev (env {_values=Map.union nmap vmap})
     where
-        ev :: ValMap -> Env -> Either String Value
-        ev vmap env = runExcept (runReaderT (eval' e) (env {_values=vmap}))
+        ev :: Env -> Either String Value
+        ev env = runExcept $ runReaderT (eval' e) env
 
 eval' (App e1 e2) = do
     env <- ask
@@ -139,16 +144,22 @@ eval' (App e1 e2) = do
     eval2 <- eval' e2
     either throwError return $ apply eval1 eval2 env
     where
-        apply (VClos x e1 vmap) e2 env =
-            runExcept (runReaderT (eval' e1) (env {_values=Map.insert x e2 vmap}))
-        apply (VFixed fn l vmap) e2 env = case found of
-            (_, Lam x _ e1):_ -> runExcept (runReaderT (eval' e1) (env {_values=nmap x}))
+        apply (VClos x e1 cenv) e2 env =
+            let nenv = (mergeEnv cenv env) {
+                _values=Map.insert x e2 $ _values cenv
+            } in runExcept $ runReaderT (eval' e1) nenv
+        apply (VFixed fn l cenv) e2 env = case found of
+            (_, Lam x _ e1):_ -> 
+                runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
             _ -> throwError "Expression is not a function; it cannot be applied"
             where
                 found = filter (\(n, _) -> n == fn) l
-                l' = map (\(n, _) -> (n, VFixed n l vmap)) l
+                l' = map (\(n, _) -> (n, VFixed n l cenv)) l
+                vmap = _values cenv
                 nmap x = Map.insert x e2 (Map.union (Map.fromList l') vmap)
-        apply _ _ _ = throwError "Expression is not a function; it cannot be applied"
+                nenv vals = (mergeEnv cenv env) { _values = vals }
+        apply _ _ _ = 
+            throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -349,3 +360,28 @@ instance Show UnOp where
     show op = case op of
         OpNeg -> "-"
         OpNot -> "not"
+
+instance Show Value where
+    show (VInt i) = show i 
+    show(VBool b) = show b
+    show (VClos n e _) = "<fun>"
+    show (VFixed _ l _) = "<fun>"
+    show v@(VCons _ _) = case v of
+        VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
+        VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
+        where
+            showLeftList v = case v of
+                VClos {} -> "<fun>"
+                VFixed {} -> "<fun>"
+                VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
+                VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " 
+                    ++ showRightList v2 ++ "]"
+                _ -> show v
+            showRightList v = case v of
+                VCons v1 VNil -> showLeftList v1
+                VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
+                VNil -> ""
+                _ -> "?"
+    show VNil = "[]"
+    show (VAlg name _ lv) = name ++ "(" ++ List.intercalate ", " (map show lv) 
+        ++ ")"
