@@ -42,7 +42,7 @@ data Expr = Var Name
           | UnOp UnOp Expr
           | Cons Expr Expr                   -- list
           | AlgCons Name [Expr]
-          | Case Name [(Pattern, Expr)]
+          | Case Name [(Pattern, Type, Expr)]
 
 data Pattern = PConst Lit            -- constant
              | PVar Name             -- variable
@@ -59,6 +59,7 @@ data Value = VInt Integer
            | VBool Bool 
            | VClos Pattern Expr Env
            | VFixed Pattern [(Pattern, Expr)] Env
+           | VCase Name [(Pattern, Expr)] Env
            | VCons Value Value
            | VNil
            | VAlg Name TypeName [Value]
@@ -124,6 +125,11 @@ eval' (Lam n t e) = do
     env <- ask
     return (VClos n e env)
 
+eval' (Case var l) = do
+    env <- ask
+    let l' = map (\(n, _, e) -> (n, e)) l
+    return (VCase var l' env)
+
 eval' (Let (PVar n) e1 e2) = do
     env <- ask
     let vmap = _values env
@@ -154,7 +160,11 @@ eval' (App e1 e2) = do
     env <- ask
     eval1 <- eval' e1
     eval2 <- eval' e2
-    either throwError return $ apply eval1 eval2 env
+    either readApplyErr return $ apply eval1 eval2 env
+    where
+        readApplyErr :: ApplyErr -> EvalReader
+        readApplyErr (ApplyFail err) = throwError err
+        readApplyErr (MatchFail) = throwError "Match fail"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -219,33 +229,40 @@ eval' (AlgCons cname le) = do
             ++ " argument(s), but is applied to " 
             ++ show provided ++ " argument(s)"
 
-apply :: Value -> Value -> Env -> Either String Value
-apply (VClos (PConst k) e1 cenv) e2 env = do
-    k' <- runExcept $ runReaderT (eval' (Lit k)) cenv
+data ApplyErr = ApplyFail String | MatchFail
+
+apply :: Value -> Value -> Env -> Either ApplyErr Value
+apply (VClos (PConst k) e1 cenv) e2 _ = do
+    k' <- either (Left . ApplyFail) return . 
+        runExcept $ runReaderT (eval' (Lit k)) cenv
     let cond = case (k', e2) of (VInt i1, VInt i2) -> i1 == i2
                                 (VBool b1, VBool b2) -> b1 == b2
                                 (VNil, VNil) -> True
                                 _ -> False
-    if cond then runExcept $ runReaderT (eval' e1) cenv 
-        else Left "Match failure"
+    if cond then either (Left . ApplyFail) return $ 
+        runExcept $ runReaderT (eval' e1) cenv else Left MatchFail
 apply (VClos (PVar x) e1 cenv) e2 env =
     let nenv = (mergeEnv cenv env) {
         _values=Map.insert x e2 $ _values cenv
-    } in runExcept $ runReaderT (eval' e1) nenv
-apply (VClos (PCons _ _) _ _) _ _ = Left "Closure PCons: unimplemented"
+    } in either (Left . ApplyFail) return . 
+        runExcept $ runReaderT (eval' e1) nenv
+apply (VClos (PCons _ _) _ _) _ _ = 
+    Left $ ApplyFail "Closure PCons: unimplemented"
 apply (VFixed (PVar fn) l cenv) e2 env = case found of
     (_, Lam (PConst k) _ e1):_ -> do
-        k' <- runExcept $ runReaderT (eval' (Lit k)) cenv
+        k' <- either (Left . ApplyFail) return . 
+            runExcept $ runReaderT (eval' (Lit k)) cenv
         let cond = case (k', e2) of (VInt i1, VInt i2) -> i1 == i2
                                     (VBool b1, VBool b2) -> b1 == b2
                                     (VNil, VNil) -> True
                                     _ -> False
-        if cond then runExcept $ runReaderT (eval' e1) (nenv $ kmap)
-            else Left "Match failure"
-    (_, Lam (PVar x) _ e1):_ -> 
+        if cond then either (Left . ApplyFail) return .
+            runExcept $ runReaderT (eval' e1) (nenv $ kmap) else Left MatchFail
+    (_, Lam (PVar x) _ e1):_ -> either (Left . ApplyFail) return .
         runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
-    (_, Lam (PCons _ _) _ _):_ -> Left "Closure PCons: unimplemented"
-    _ -> Left "Expression is not a function; it cannot be applied"
+    (_, Lam (PCons _ _) _ _):_ -> 
+        Left $ ApplyFail "Closure PCons: unimplemented"
+    _ -> Left $ ApplyFail "Expression is not a function; it cannot be applied"
     where
         found = filter (\(PVar n, _) -> n == fn) l
         l' = map (\(v@(PVar n), _) -> (n, VFixed v l cenv)) l
@@ -253,7 +270,16 @@ apply (VFixed (PVar fn) l cenv) e2 env = case found of
         kmap = Map.union (Map.fromList l') vmap
         nmap x = Map.insert x e2 kmap
         nenv vals = (mergeEnv cenv env) { _values = vals }
-apply _ _ _ = Left "Expression is not a function; it cannot be applied"
+apply (VCase var l cenv) e2 env = workL l
+    where 
+        workL :: [(Pattern, Expr)] -> Either ApplyErr Value
+        workL ((p, e):t) = case apply (VClos p e cenv) e2 env of
+            Left MatchFail -> workL t
+            err@(Left _) -> err
+            val@(Right _) -> val
+        workL [] = Left MatchFail
+apply _ _ _ = 
+    Left $ ApplyFail "Expression is not a function; it cannot be applied"
 
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t
@@ -349,6 +375,18 @@ typeOf (AlgCons cname le) = do
         Just tlist -> return tlist
     _ <- zipWithM_ checkType le types
     return $ TAlg typename
+typeOf (Case n []) = throwError "Type: Empty pattern match"  -- impossible
+typeOf (Case n ((p, t0, e):t)) = do
+    env <- ask
+    let ntenv = patToEnv p t0
+    t1 <- local (\env -> ntenv env) (typeOf e)
+    _  <- mapM_ (\(p, t, e) -> local (\e -> patToEnv p t e) (checkType e t0)) t
+    return $ TFun t0 t1
+    where
+        patToEnv :: Pattern -> Type -> Env -> Env
+        patToEnv (PConst _) _ env = env
+        patToEnv (PCons {}) _ env = env
+        patToEnv (PVar n) t env = env {_types = Map.insert n t $ _types env}
 
 checkType :: Expr -> Type -> TypeReader
 checkType e t = do
@@ -356,7 +394,6 @@ checkType e t = do
     if t == t' then return t 
     else throwError $ "Type error: " ++ show e ++ " should be " ++ show t 
         ++ " but is of type " ++ show t'
-
 
 ----- SHOW INSTANCES -----
 instance Show Expr where
@@ -376,6 +413,9 @@ instance Show Expr where
     show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
     show (AlgCons n le) = n ++ " of (" ++ List.intercalate ", " (map show le) 
         ++ ")"
+    show (Case n l) = "match " ++ n ++ " with { " ++ 
+        List.intercalate "; " (map (\(p, _, e) -> 
+            "case " ++ show p ++ " -> " ++ show e) l) ++ " }"
 
 instance Show Pattern where
     show (PConst lit) = show lit
@@ -441,3 +481,4 @@ instance Show Value where
     show VNil = "[]"
     show (VAlg name _ lv) = name ++ "(" ++ List.intercalate ", " (map show lv) 
         ++ ")"
+    show (VCase n l _) = "<pattern-match>"

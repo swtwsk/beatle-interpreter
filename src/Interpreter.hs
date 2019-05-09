@@ -168,8 +168,10 @@ translateExpr (ELetIn letdef e) = do
             (n, _, fe):t -> L.Let n fe (transLambda t e)
             [] -> e
 
-translateExpr (EMatch (VIdent n) matchList) =
-    Left "unimplemented"
+translateExpr (EMatch (VIdent n) matchList) = do
+    ml <- mapM translateMatching matchList
+    pure $ L.Case n ml
+
 translateExpr (ELambda vlist e) = do
     te <- translateExpr e
     pure $ transLambda vlist te
@@ -206,7 +208,6 @@ translateLetBind (ConstBind p e) = do
     let (n, t) = tp
     te <- translateExpr e
     pure (n, t, te)
--- TODO: read rt
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     tpl <- sequence $ map translatePattern pl
     te <- translateExpr e
@@ -220,7 +221,6 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
             (n, typ):t  -> L.Lam n typ (transLambda t e)
             [] -> e
 
--- TODO: This is totally not how it should be
 translatePattern :: Pattern -> TransRes (L.Pattern, T.Type)
 translatePattern (PId (VIdent n)) = Left "Pattern: VIdent unimplemented"
 translatePattern (PTyped (PId (VIdent n)) t) = pure (L.PVar n, translateType t)
@@ -230,6 +230,14 @@ translatePattern PFalse = pure (L.PConst $ LBool False, T.TBool)
 translatePattern PWildcard = Left "Pattern: Wildcard unimplemented"
 translatePattern PListEmpty = Left "Pattern: cannot type empty list"
 translatePattern _ = Left "Pattern: unimplemented"
+
+translateMatching :: Matching -> TransRes (L.Pattern, T.Type, L.Expr)
+translateMatching (MatchCase (CPattern p) expr) = do
+    tp <- translatePattern p
+    let (n, t) = tp
+    te <- translateExpr expr
+    pure $ (n, t, te)
+translateMatching _ = Left "Matchcase: unimplemented"
 
 translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
