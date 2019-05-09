@@ -205,6 +205,7 @@ instance Print LambdaVI where
   prt i e = case e of
     TypedVId vident type_ -> prPrec i 0 (concatD [doc (showString "("), prt 0 vident, doc (showString ":"), prt 0 type_, doc (showString ")")])
     LambdaVId vident -> prPrec i 0 (concatD [prt 0 vident])
+    WildVId -> prPrec i 0 (concatD [doc (showString "_")])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
 

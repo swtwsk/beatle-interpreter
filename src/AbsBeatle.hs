@@ -85,7 +85,7 @@ data Expr
     | ETypeCons TIdent [Expr]
   deriving (Eq, Ord, Show, Read)
 
-data LambdaVI = TypedVId VIdent Type | LambdaVId VIdent
+data LambdaVI = TypedVId VIdent Type | LambdaVId VIdent | WildVId
   deriving (Eq, Ord, Show, Read)
 
 data Matching = MatchCase CasePat Expr

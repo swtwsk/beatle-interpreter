@@ -11,7 +11,7 @@ import AbsBeatle
 import ErrM
 import Utils
 
-import Lambda hiding (Expr(..), TypeDef(..))
+import Lambda hiding (Expr(..), TypeDef(..), Pattern(..))
 import qualified Lambda as L
 import qualified Types as T
 
@@ -25,7 +25,7 @@ type Result = TransRes InterRes
 
 type IState = StateT L.Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(Name, T.Type, L.Expr)] | Rec [(Name, T.Type, L.Expr)]
+data Fun = Fun [(L.Pattern, T.Type, L.Expr)] | Rec [(L.Pattern, T.Type, L.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -48,14 +48,19 @@ interpretPhrase (Value letdef) = do
                 mapM (\(_, t, e') -> typeEqualCheck env e' t) list
             either throwError return $ seqPair $ map (ev env) list
         Rec list -> do
-            let tmap  = Map.fromList $ map (\(n, t, _) -> (n, t)) list
+            tlist <- mapM (either throwError return . extractVar) list
+            let tmap  = Map.fromList tlist
                 tmap' = Map.union tmap (_types env)
                 env'  = env { _types = tmap' }
             _ <- either throwError return $ 
                 mapM (\(_, _, e') -> typeCheck env' e') list
             return $ L.fixed env list
-    let m' = map (\(n, (v, _)) -> (n, v)) m
-    let t' = map (\(n, (_, t)) -> (n, t)) m
+            where
+                extractVar (L.PVar n, t, _) = pure (n, t)
+                extractVar _ = Left "Patterns in letrecs: Unimplemented"
+    ms <- mapM (either throwError return . extractVar) m
+    let m' = map (\(n, v, _) -> (n, v)) ms
+    let t' = map (\(n, _, t) -> (n, t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _types  = Map.union (Map.fromList t') (_types env) }
     extr <- return $ map extract m
@@ -63,6 +68,8 @@ interpretPhrase (Value letdef) = do
     where
         ev env (name, _, expr) = (name, eval env expr)
         extract (_, expr) = expr
+        extractVar (L.PVar n, (v, t)) = pure (n, v, t)
+        extractVar _ = Left "Patterns in letrecs: Unimplemented"
 interpretPhrase (TypeDecl typedef) = do
     env <- get
     ttd <- either throwError return $ translateTypeDef typedef
@@ -169,9 +176,10 @@ translateExpr (ELambda vlist e) = do
     where 
         transLambda l e = case l of
             (TypedVId (VIdent n) typ):t -> 
-                L.Lam n (translateType typ) (transLambda t e)
+                L.Lam (L.PVar n) (translateType typ) (transLambda t e)
             -- STUPID PLACEHOLDER
-            (LambdaVId (VIdent n)):t -> L.Lam n T.TInt (transLambda t e)
+            (LambdaVId (VIdent n)):t -> L.Lam (L.PVar n) T.TInt (transLambda t e)
+            (WildVId):t -> L.Lam (L.PVar "_") T.TInt (transLambda t e)
             [] -> e
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
@@ -192,7 +200,7 @@ translateLetDef ld = case ld of
     LetRec letbinds -> 
         either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (String, T.Type, L.Expr)
+translateLetBind :: LetBind -> TransRes (L.Pattern, T.Type, L.Expr)
 translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
     let (n, t) = tp
@@ -206,16 +214,21 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
         Nothing -> Left "function return type not specified"
         Just trt' -> pure trt'
     let proctype = foldr (\(_, t) acc -> T.TFun t acc) trt tpl
-    pure (proc, proctype, transLambda tpl te)
+    pure (L.PVar proc, proctype, transLambda tpl te)
     where
         transLambda l e = case l of
             (n, typ):t  -> L.Lam n typ (transLambda t e)
             [] -> e
 
 -- TODO: This is totally not how it should be
-translatePattern :: Pattern -> TransRes (String, T.Type)
+translatePattern :: Pattern -> TransRes (L.Pattern, T.Type)
 translatePattern (PId (VIdent n)) = Left "Pattern: VIdent unimplemented"
-translatePattern (PTyped (PId (VIdent n)) t) = pure (n, translateType t)
+translatePattern (PTyped (PId (VIdent n)) t) = pure (L.PVar n, translateType t)
+translatePattern (PInt i) = pure (L.PConst $ LInt i, T.TInt)
+translatePattern PTrue = pure (L.PConst $ LBool True, T.TBool)
+translatePattern PFalse = pure (L.PConst $ LBool False, T.TBool)
+translatePattern PWildcard = Left "Pattern: Wildcard unimplemented"
+translatePattern PListEmpty = Left "Pattern: cannot type empty list"
 translatePattern _ = Left "Pattern: unimplemented"
 
 translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)

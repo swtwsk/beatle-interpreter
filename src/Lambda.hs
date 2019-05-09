@@ -1,6 +1,7 @@
 module Lambda (
     Name,
     Expr(..),
+    Pattern(..),
     Lit(..),
     BinOp(..),
     UnOp(..),
@@ -31,16 +32,21 @@ import Utils
 type Name = String
 
 data Expr = Var Name
-          | Lam Name Type Expr
+          | Lam Pattern Type Expr
           | Lit Lit
           | App Expr Expr
-          | Let Name Expr Expr
-          | LetRec [(Name, Type, Expr)] Expr
+          | Let Pattern Expr Expr
+          | LetRec [(Pattern, Type, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
-          | Cons Expr Expr
+          | Cons Expr Expr                   -- list
           | AlgCons Name [Expr]
+          | Case Name [(Pattern, Expr)]
+
+data Pattern = PConst Lit            -- constant
+             | PVar Name             -- variable
+             | PCons Pattern Pattern -- list
 
 data Lit = LInt Integer
          | LBool Bool
@@ -51,8 +57,8 @@ data UnOp = OpNeg | OpNot
 
 data Value = VInt Integer 
            | VBool Bool 
-           | VClos Name Expr Env
-           | VFixed Name [(Name, Expr)] Env
+           | VClos Pattern Expr Env
+           | VFixed Pattern [(Pattern, Expr)] Env
            | VCons Value Value
            | VNil
            | VAlg Name TypeName [Value]
@@ -87,7 +93,7 @@ mergeEnv env1 env2 =
 type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: Env -> [(Name, Type, Expr)] -> [(Name, (Value, Type))]
+fixed :: Env -> [(Pattern, Type, Expr)] -> [(Pattern, (Value, Type))]
 fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
     where l' = map (\(n, _, e) -> (n, e)) l
 
@@ -118,7 +124,7 @@ eval' (Lam n t e) = do
     env <- ask
     return (VClos n e env)
 
-eval' (Let n e1 e2) = do
+eval' (Let (PVar n) e1 e2) = do
     env <- ask
     let vmap = _values env
     eval1 <- either fail return $ eval env e1
@@ -129,37 +135,26 @@ eval' (Let n e1 e2) = do
         ev :: ValMap -> Env -> Either String Value
         ev vmap env = runExcept (runReaderT (eval' e2) (env {_values=vmap}))
 
+eval' (Let {}) = throwError $ "Patterns in lets: Unimplemented"
+
 eval' (LetRec l e) = do
     env <- ask
     let vmap = _values env
-    let nmap = Map.fromList $ map (\(n, (v, _)) -> (n, v)) $ fixed env l
+    prepVals <- mapM (either throwError return . extractVar) $ fixed env l
+    let nmap = Map.fromList prepVals
     either throwError return $ ev (env {_values=Map.union nmap vmap})
     where
         ev :: Env -> Either String Value
         ev env = runExcept $ runReaderT (eval' e) env
+        extractVar :: (Pattern, (Value, Type)) -> Either String (Name, Value)
+        extractVar (PVar n, (v, _)) = pure (n, v)
+        extractVar _ = Left "Patterns in letrecs: Unimplemented"
 
 eval' (App e1 e2) = do
     env <- ask
     eval1 <- eval' e1
     eval2 <- eval' e2
     either throwError return $ apply eval1 eval2 env
-    where
-        apply (VClos x e1 cenv) e2 env =
-            let nenv = (mergeEnv cenv env) {
-                _values=Map.insert x e2 $ _values cenv
-            } in runExcept $ runReaderT (eval' e1) nenv
-        apply (VFixed fn l cenv) e2 env = case found of
-            (_, Lam x _ e1):_ -> 
-                runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
-            _ -> throwError "Expression is not a function; it cannot be applied"
-            where
-                found = filter (\(n, _) -> n == fn) l
-                l' = map (\(n, _) -> (n, VFixed n l cenv)) l
-                vmap = _values cenv
-                nmap x = Map.insert x e2 (Map.union (Map.fromList l') vmap)
-                nenv vals = (mergeEnv cenv env) { _values = vals }
-        apply _ _ _ = 
-            throwError "Expression is not a function; it cannot be applied"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -224,6 +219,42 @@ eval' (AlgCons cname le) = do
             ++ " argument(s), but is applied to " 
             ++ show provided ++ " argument(s)"
 
+apply :: Value -> Value -> Env -> Either String Value
+apply (VClos (PConst k) e1 cenv) e2 env = do
+    k' <- runExcept $ runReaderT (eval' (Lit k)) cenv
+    let cond = case (k', e2) of (VInt i1, VInt i2) -> i1 == i2
+                                (VBool b1, VBool b2) -> b1 == b2
+                                (VNil, VNil) -> True
+                                _ -> False
+    if cond then runExcept $ runReaderT (eval' e1) cenv 
+        else Left "Match failure"
+apply (VClos (PVar x) e1 cenv) e2 env =
+    let nenv = (mergeEnv cenv env) {
+        _values=Map.insert x e2 $ _values cenv
+    } in runExcept $ runReaderT (eval' e1) nenv
+apply (VClos (PCons _ _) _ _) _ _ = Left "Closure PCons: unimplemented"
+apply (VFixed (PVar fn) l cenv) e2 env = case found of
+    (_, Lam (PConst k) _ e1):_ -> do
+        k' <- runExcept $ runReaderT (eval' (Lit k)) cenv
+        let cond = case (k', e2) of (VInt i1, VInt i2) -> i1 == i2
+                                    (VBool b1, VBool b2) -> b1 == b2
+                                    (VNil, VNil) -> True
+                                    _ -> False
+        if cond then runExcept $ runReaderT (eval' e1) (nenv $ kmap)
+            else Left "Match failure"
+    (_, Lam (PVar x) _ e1):_ -> 
+        runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
+    (_, Lam (PCons _ _) _ _):_ -> Left "Closure PCons: unimplemented"
+    _ -> Left "Expression is not a function; it cannot be applied"
+    where
+        found = filter (\(PVar n, _) -> n == fn) l
+        l' = map (\(v@(PVar n), _) -> (n, VFixed v l cenv)) l
+        vmap = _values cenv
+        kmap = Map.union (Map.fromList l') vmap
+        nmap x = Map.insert x e2 kmap
+        nenv vals = (mergeEnv cenv env) { _values = vals }
+apply _ _ _ = Left "Expression is not a function; it cannot be applied"
+
 typeError :: String -> String
 typeError t = "Expression was expected of type " ++ t
 
@@ -244,31 +275,38 @@ typeOf (Var var) = do
     case Map.lookup var tenv of
         Nothing -> throwError $ "Type: Unbound value " ++ var
         Just t -> return t
-typeOf (Lam n t0 e) = do
+typeOf (Lam (PVar n) t0 e) = do
     env <- ask
     let ntenv = Map.insert n t0 $ _types env
     t1 <- local (\env -> env {_types = ntenv}) (typeOf e)
     return $ TFun t0 t1
+typeOf (Lam (PConst k) t0 e) = checkType (Lit k) t0 >> typeOf e
+typeOf (Lam (PCons p1 p2) t0 e) = throwError "Type error: PCons unimplemented"
 typeOf (App e1 e2) = do
     t1 <- typeOf e1
     case t1 of
         TFun tl tr -> checkType e2 tl >> return tr
         _ -> throwError $ "Type error: " ++ show e1 ++ " is of type " ++ show t1
-typeOf (Let n e1 e2) = do
+typeOf (Let (PVar n) e1 e2) = do
     t1 <- typeOf e1
     env <- ask
     let ntenv = Map.insert n t1 $ _types env
     local (\env -> env {_types = ntenv}) (typeOf e2)
+typeOf (Let {}) = throwError "Type: Patterns in let unimplemented"
 typeOf (LetRec l e) = do
     env <- ask
-    let nte = Map.union tmap $ _types env
+    tlist <- mapM (either throwError return . extractVar) l
+    let nte = Map.union (Map.fromList tlist) $ _types env
     tl <- mapM (\(_, _, e') -> local (\env -> env {_types = nte}) (typeOf e')) l
+    nlist <- mapM (either throwError return . extractNames) l
     let typeMap = Map.fromList $ zip nlist tl
     local (\env -> env {_types = typeMap}) (typeOf e)
     where
-        tlist = map (\(n, t, _) -> (n, t)) l
-        tmap  = Map.fromList tlist
-        nlist = map (\(n, _, _) -> n) l
+        extractVar :: (Pattern, Type, Expr) -> Either String (Name, Type)
+        extractVar (PVar n, t, _) = pure (n, t)
+        extractVar _ = Left "Patterns in letrecs: Unimplemented"
+        extractNames (PVar n, _, _) = pure n
+        extractNames _ = Left "Patterns in letrecs: Unimplemented"
 typeOf (If cond e1 e2) = do
     tc <- checkType cond TBool
     t1 <- typeOf e1
@@ -323,13 +361,13 @@ checkType e t = do
 ----- SHOW INSTANCES -----
 instance Show Expr where
     show (Var n) = n
-    show (Lam n t e) = "λ(" ++ n ++ " : " ++ show t ++ ") -> " ++ show e
+    show (Lam n t e) = "λ(" ++ show n ++ " : " ++ show t ++ ") -> " ++ show e
     show (Lit l) = show l
     show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
-    show (Let n e1 e2) = "let " ++ n ++ " = " ++ show e1 ++ " in " ++ show e2
+    show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
     show (LetRec l e) = 
         "letrec " ++ 
-        List.intercalate " also " (map (\(n, _, e') -> n ++ " = " 
+        List.intercalate " also " (map (\(n, _, e') -> show n ++ " = " 
         ++ show e') l) ++ " in " ++ show e
     show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
         " else " ++ show e2
@@ -338,6 +376,24 @@ instance Show Expr where
     show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
     show (AlgCons n le) = n ++ " of (" ++ List.intercalate ", " (map show le) 
         ++ ")"
+
+instance Show Pattern where
+    show (PConst lit) = show lit
+    show (PVar n) = n
+    show p@(PCons _ _) = case p of
+        PCons p1 (PConst LNil) -> "[" ++ showLeftList p1 ++ "]"
+        PCons p1 p2 -> "[" ++ showLeftList p1 ++ ", " ++ showRightList p2 ++ "]"
+        where
+            showLeftList p = case p of
+                PCons p1 (PConst LNil) -> "[" ++ showLeftList p1 ++ "]"
+                PCons p1 p2 -> "[" ++ showLeftList p1 ++ ", " 
+                    ++ showRightList p2 ++ "]"
+                _ -> show p
+            showRightList p = case p of
+                PCons p1 (PConst LNil) -> showLeftList p1
+                PCons p1 p2 -> showLeftList p1 ++ ", " ++ showRightList p2
+                (PConst LNil) -> ""
+                _ -> "?"
 
 instance Show Lit where
     show lit = case lit of
@@ -363,7 +419,7 @@ instance Show UnOp where
 
 instance Show Value where
     show (VInt i) = show i 
-    show(VBool b) = show b
+    show (VBool b) = show b
     show (VClos n e _) = "<fun>"
     show (VFixed _ l _) = "<fun>"
     show v@(VCons _ _) = case v of

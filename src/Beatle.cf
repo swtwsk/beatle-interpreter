@@ -86,6 +86,7 @@ ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
 
 TypedVId.   LambdaVI ::= "(" VIdent ":" Type ")" ;
 LambdaVId.  LambdaVI ::= VIdent ;
+WildVId.    LambdaVI ::= "_" ;
 
 separator nonempty Expr "," ;
 separator nonempty Matching ";" ;
