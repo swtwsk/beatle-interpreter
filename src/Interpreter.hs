@@ -8,24 +8,23 @@ import Control.Monad.Except
 import qualified Data.Map as Map
 
 import AbsBeatle
-import ErrM
 import Utils
 
-import Lambda hiding (Expr(..), TypeDef(..), Pattern(..))
-import qualified Lambda as L
-import qualified Types as T
+import Lambda
+import Values hiding (TypeDef(..))
+import qualified Values as V
+import qualified Expr as E
 
-type OldResult = Err String
 
-data InterRes = InterVal [(Value, T.Type)]
-              | InterType Name [(Name, [T.Type])]
+data InterRes = InterVal [(Value, E.Type)]
+              | InterType Name [(Name, [E.Type])]
 
 type TransRes = Either String
 type Result = TransRes InterRes
 
-type IState = StateT L.Env (ExceptT String (InputT IO))
+type IState = StateT Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(L.Pattern, T.Type, L.Expr)] | Rec [(L.Pattern, T.Type, L.Expr)]
+data Fun = Fun [(E.Pattern, E.Type, E.Expr)] | Rec [(E.Pattern, E.Type, E.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -54,9 +53,9 @@ interpretPhrase (Value letdef) = do
                 env'  = env { _types = tmap' }
             _ <- either throwError return $ 
                 mapM (\(_, _, e') -> typeCheck env' e') list
-            return $ L.fixed env list
+            return $ fixed env list
             where
-                extractVar (L.PVar n, t, _) = pure (n, t)
+                extractVar (E.PVar n, t, _) = pure (n, t)
                 extractVar _ = Left "Patterns in letrecs: Unimplemented"
     ms <- mapM (either throwError return . extractVar) m
     let m' = map (\(n, v, _) -> (n, v)) ms
@@ -68,109 +67,109 @@ interpretPhrase (Value letdef) = do
     where
         ev env (name, _, expr) = (name, eval env expr)
         extract (_, expr) = expr
-        extractVar (L.PVar n, (v, t)) = pure (n, v, t)
+        extractVar (E.PVar n, (v, t)) = pure (n, v, t)
         extractVar _ = Left "Patterns in letrecs: Unimplemented"
 interpretPhrase (TypeDecl typedef) = do
     env <- get
     ttd <- either throwError return $ translateTypeDef typedef
     let (tname, tdef) = ttd
     let tmap = Map.insert tname tdef $ _algtypes env
-    let cons = map (\(n, t) -> (n, (length t, tname))) $ L.consdef tdef
+    let cons = map (\(n, t) -> (n, (length t, tname))) $ V.consdef tdef
     let cmap = Map.union (Map.fromList cons) (_constructors env)
     put $ env { _constructors = cmap, _algtypes = tmap }
-    return . pure $ InterType tname (L.consdef tdef)
+    return . pure $ InterType tname (V.consdef tdef)
 
-translateExpr :: Expr -> TransRes L.Expr
-translateExpr (EId (VIdent n)) = pure $ L.Var n
-translateExpr (EInt i) = pure . L.Lit $ L.LInt i
-translateExpr ETrue = pure . L.Lit $ L.LBool True
-translateExpr EFalse = pure . L.Lit $ L.LBool False
-translateExpr EListEmpty = pure . L.Lit $ L.LNil
+translateExpr :: Expr -> TransRes E.Expr
+translateExpr (EId (VIdent n)) = pure $ E.Var n
+translateExpr (EInt i) = pure . E.Lit $ E.LInt i
+translateExpr ETrue = pure . E.Lit $ E.LBool True
+translateExpr EFalse = pure . E.Lit $ E.LBool False
+translateExpr EListEmpty = pure . E.Lit $ E.LNil
 translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.App te1 te2
+    pure $ E.App te1 te2
 translateExpr (ETyped _ _) = Left "Unimplemented"
 translateExpr (ENeg e) = do
     te <- translateExpr e
-    pure $ L.UnOp L.OpNeg te
+    pure $ E.UnOp E.OpNeg te
 translateExpr (ENot e) = do
     te <- translateExpr e
-    pure $ L.UnOp L.OpNot te
+    pure $ E.UnOp E.OpNot te
 translateExpr (EMul e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpMul te1 te2
+    pure $ E.BinOp E.OpMul te1 te2
 translateExpr (EDiv e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpDiv te1 te2
+    pure $ E.BinOp E.OpDiv te1 te2
 translateExpr (EAdd e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpAdd te1 te2
+    pure $ E.BinOp E.OpAdd te1 te2
 translateExpr (ESub e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpSub te1 te2
+    pure $ E.BinOp E.OpSub te1 te2
 translateExpr (EMod e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
     pure $ 
-        L.BinOp L.OpSub te1 (L.BinOp L.OpMul te2 (L.BinOp L.OpDiv te1 te2))
+        E.BinOp E.OpSub te1 (E.BinOp E.OpMul te2 (E.BinOp E.OpDiv te1 te2))
 translateExpr (EListCons e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.Cons te1 te2
+    pure $ E.Cons te1 te2
 translateExpr (ELTH e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpLT te1 te2
+    pure $ E.BinOp E.OpLT te1 te2
 translateExpr (ELE e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpOr (L.BinOp L.OpLT te1 te2) (L.BinOp L.OpEq te1 te2)
+    pure $ E.BinOp E.OpOr (E.BinOp E.OpLT te1 te2) (E.BinOp E.OpEq te1 te2)
 translateExpr (EGTH e1 e2) = do
     le <- translateExpr (ELE e1 e2)
-    pure $ L.UnOp L.OpNot le
+    pure $ E.UnOp E.OpNot le
 translateExpr (EGE e1 e2) = do
     less <- translateExpr (ELTH e1 e2)
-    pure $ L.UnOp L.OpNot less
+    pure $ E.UnOp E.OpNot less
 translateExpr (EEQU e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpEq te1 te2
+    pure $ E.BinOp E.OpEq te1 te2
 translateExpr (ENE e1 e2) = do
     eq <- translateExpr (EEQU e1 e2)
-    pure $ L.UnOp L.OpNot eq
+    pure $ E.UnOp E.OpNot eq
 translateExpr (EAnd e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpAnd te1 te2
+    pure $ E.BinOp E.OpAnd te1 te2
 translateExpr (EOr e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.BinOp L.OpOr te1 te2
+    pure $ E.BinOp E.OpOr te1 te2
 translateExpr (ECond cond e1 e2) = do
     tc <- translateExpr cond
     te1 <- translateExpr e1
     te2 <- translateExpr e2
-    pure $ L.If tc te1 te2
+    pure $ E.If tc te1 te2
 
 translateExpr (ELetIn letdef e) = do
     tl <- translateLetDef letdef
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> pure $ L.LetRec list te
+        Rec list -> pure $ E.LetRec list te
     where
         transLambda l e = case l of
-            (n, _, fe):t -> L.Let n fe (transLambda t e)
+            (n, _, fe):t -> E.Let n fe (transLambda t e)
             [] -> e
 
 translateExpr (EMatch (VIdent n) matchList) = do
     ml <- mapM translateMatching matchList
-    pure $ L.Case n ml
+    pure $ E.Case n ml
 
 translateExpr (ELambda vlist e) = do
     te <- translateExpr e
@@ -178,22 +177,22 @@ translateExpr (ELambda vlist e) = do
     where 
         transLambda l e = case l of
             (TypedVId (VIdent n) typ):t -> 
-                L.Lam (L.PVar n) (translateType typ) (transLambda t e)
+                E.Lam (E.PVar n) (translateType typ) (transLambda t e)
             -- STUPID PLACEHOLDER
-            (LambdaVId (VIdent n)):t -> L.Lam (L.PVar n) T.TInt (transLambda t e)
-            (WildVId):t -> L.Lam (L.PVar "_") T.TInt (transLambda t e)
+            (LambdaVId (VIdent n)):t -> E.Lam (E.PVar n) E.TInt (transLambda t e)
+            (WildVId):t -> E.Lam (E.PVar "_") E.TInt (transLambda t e)
             [] -> e
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
     pure . trans $ tlist
     where 
         trans l = case l of
-            h:t -> L.Cons h (trans t)
-            [] -> L.Lit L.LNil
-translateExpr (ETypeAlg (TIdent t)) = pure $ L.AlgCons t []
+            h:t -> E.Cons h (trans t)
+            [] -> E.Lit E.LNil
+translateExpr (ETypeAlg (TIdent t)) = pure $ E.AlgCons t []
 translateExpr (ETypeCons (TIdent t) elist) = do
     tlist <- sequence $ map translateExpr elist
-    pure $ L.AlgCons t tlist
+    pure $ E.AlgCons t tlist
 
 translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
@@ -202,7 +201,7 @@ translateLetDef ld = case ld of
     LetRec letbinds -> 
         either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (L.Pattern, T.Type, L.Expr)
+translateLetBind :: LetBind -> TransRes (E.Pattern, E.Type, E.Expr)
 translateLetBind (ConstBind p e) = do
     tp <- translatePattern p
     let (n, t) = tp
@@ -214,24 +213,24 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
     trt <- case translateRetType rt of
         Nothing -> Left "function return type not specified"
         Just trt' -> pure trt'
-    let proctype = foldr (\(_, t) acc -> T.TFun t acc) trt tpl
-    pure (L.PVar proc, proctype, transLambda tpl te)
+    let proctype = foldr (\(_, t) acc -> E.TFun t acc) trt tpl
+    pure (E.PVar proc, proctype, transLambda tpl te)
     where
         transLambda l e = case l of
-            (n, typ):t  -> L.Lam n typ (transLambda t e)
+            (n, typ):t  -> E.Lam n typ (transLambda t e)
             [] -> e
 
-translatePattern :: Pattern -> TransRes (L.Pattern, T.Type)
+translatePattern :: Pattern -> TransRes (E.Pattern, E.Type)
 translatePattern (PId (VIdent n)) = Left "Pattern: VIdent unimplemented"
-translatePattern (PTyped (PId (VIdent n)) t) = pure (L.PVar n, translateType t)
-translatePattern (PInt i) = pure (L.PConst $ LInt i, T.TInt)
-translatePattern PTrue = pure (L.PConst $ LBool True, T.TBool)
-translatePattern PFalse = pure (L.PConst $ LBool False, T.TBool)
+translatePattern (PTyped (PId (VIdent n)) t) = pure (E.PVar n, translateType t)
+translatePattern (PInt i) = pure (E.PConst $ LInt i, E.TInt)
+translatePattern PTrue = pure (E.PConst $ LBool True, E.TBool)
+translatePattern PFalse = pure (E.PConst $ LBool False, E.TBool)
 translatePattern PWildcard = Left "Pattern: Wildcard unimplemented"
 translatePattern PListEmpty = Left "Pattern: cannot type empty list"
 translatePattern _ = Left "Pattern: unimplemented"
 
-translateMatching :: Matching -> TransRes (L.Pattern, T.Type, L.Expr)
+translateMatching :: Matching -> TransRes (E.Pattern, E.Type, E.Expr)
 translateMatching (MatchCase (CPattern p) expr) = do
     tp <- translatePattern p
     let (n, t) = tp
@@ -239,126 +238,23 @@ translateMatching (MatchCase (CPattern p) expr) = do
     pure $ (n, t, te)
 translateMatching _ = Left "Matchcase: unimplemented"
 
-translateTypeDef :: TypeDef -> TransRes (Name, L.TypeDef)
+translateTypeDef :: TypeDef -> TransRes (Name, V.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
     let mpolys = map (\(TPolyIdent s) -> s) polys
     tl <- sequence $ map translateTypeCons ltcons
-    return $ (t, L.TypeDef { L.polynames = mpolys, L.consdef = tl })
+    return $ (t, V.TypeDef { V.polynames = mpolys, V.consdef = tl })
 
-translateTypeCons :: TypeCons -> TransRes (Name, [T.Type])
+translateTypeCons :: TypeCons -> TransRes (Name, [E.Type])
 translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
 
-translateType :: Type -> T.Type
-translateType TInt = T.TInt
-translateType TBool = T.TBool
-translateType (TList t) = T.TList $ translateType t
-translateType (TAlgebraic (TIdent t)) = T.TAlg t
-translateType (TPoly (TPolyIdent t)) = T.TPoly t
-translateType (TFun t1 t2) = T.TFun (translateType t1) (translateType t2)
+translateType :: Type -> E.Type
+translateType TInt = E.TInt
+translateType TBool = E.TBool
+translateType (TList t) = E.TList $ translateType t
+translateType (TAlgebraic (TIdent t)) = E.TAlg t
+translateType (TPoly (TPolyIdent t)) = E.TPoly t
+translateType (TFun t1 t2) = E.TFun (translateType t1) (translateType t2)
 
-translateRetType :: RType -> Maybe T.Type
+translateRetType :: RType -> Maybe E.Type
 translateRetType NoRetType = Nothing
 translateRetType (RetType t) = pure $ translateType t
-
-failure :: Show a => a -> OldResult
-failure x = Bad $ "Undefined case: " ++ show x
-
-transTIdent :: TIdent -> OldResult
-transTIdent x = case x of
-  TIdent string -> failure x
-transTPolyIdent :: TPolyIdent -> OldResult
-transTPolyIdent x = case x of
-  TPolyIdent string -> failure x
-transPhrase :: Phrase -> OldResult
-transPhrase x = case x of
-  Value letdef -> failure x
-  Expression expr -> failure x
-  TypeDecl typedef -> failure x
-transLetDef :: LetDef -> OldResult
-transLetDef x = case x of
-  Let letbinds -> failure x
-  LetRec letbinds -> failure x
-transLetBind :: LetBind -> OldResult
-transLetBind x = case x of
-  ConstBind pattern expr -> failure x
-  ProcBind procname patterns rtype expr -> failure x
-transPNested :: PNested -> OldResult
-transPNested x = case x of
-  PAlgWild -> failure x
-  PAlgList patterns -> failure x
-transCasePat :: CasePat -> OldResult
-transCasePat x = case x of
-  CPattern pattern -> failure x
-  CTypeAlgRec tident pnested -> failure x
-  CNamedPat vident pattern -> failure x
-  CListCons pattern1 pattern2 -> failure x
-transPattern :: Pattern -> OldResult
-transPattern x = case x of
-  PId vident -> failure x
-  PInt integer -> failure x
-  PTrue -> failure x
-  PFalse -> failure x
-  PWildcard -> failure x
-  PListEmpty -> failure x
-  PTypeAlg tident -> failure x
-  PTyped pattern type_ -> failure x
-  PList patterns -> failure x
-  PTypeAlgRec tident pnested -> failure x
-  PNamedPat vident pattern -> failure x
-  PListCons pattern1 pattern2 -> failure x
-transExpr :: Expr -> OldResult
-transExpr x = case x of
-  EId vident -> failure x
-  EInt integer -> failure x
-  ETrue -> failure x
-  EFalse -> failure x
-  EListEmpty -> failure x
-  ETypeAlg tident -> failure x
-  EApp expr1 expr2 -> failure x
-  ETyped expr type_ -> failure x
-  ENeg expr -> failure x
-  ENot expr -> failure x
-  EMul expr1 expr2 -> failure x
-  EDiv expr1 expr2 -> failure x
-  EMod expr1 expr2 -> failure x
-  EAdd expr1 expr2 -> failure x
-  ESub expr1 expr2 -> failure x
-  EListCons expr1 expr2 -> failure x
-  ELTH expr1 expr2 -> failure x
-  ELE expr1 expr2 -> failure x
-  EGTH expr1 expr2 -> failure x
-  EGE expr1 expr2 -> failure x
-  EEQU expr1 expr2 -> failure x
-  ENE expr1 expr2 -> failure x
-  EAnd expr1 expr2 -> failure x
-  EOr expr1 expr2 -> failure x
-  ECond expr1 expr2 expr3 -> failure x
-  ELetIn letdef expr -> failure x
-  EMatch vident matchings -> failure x
-  ELambda vidents expr -> failure x
-  EList exprs -> failure x
-  ETypeCons tident exprs -> failure x
-transMatching :: Matching -> OldResult
-transMatching x = case x of
-  MatchCase casepat expr -> failure x
-transProcName :: ProcName -> OldResult
-transProcName x = case x of
-  ProcNameId vident -> failure x
-transTypeDef :: TypeDef -> OldResult
-transTypeDef x = case x of
-  TDef tident tpolyidents typeconss -> failure x
-transTypeCons :: TypeCons -> OldResult
-transTypeCons x = case x of
-  TCons tident types -> failure x
-transType :: Type -> OldResult
-transType x = case x of
-  TInt -> failure x
-  TBool -> failure x
-  TAlgebraic tident -> failure x
-  TPoly tpolyident -> failure x
-  TFun type_1 type_2 -> failure x
-transRType :: RType -> OldResult
-transRType x = case x of
-  NoRetType -> failure x
-  RetType type_ -> failure x
-

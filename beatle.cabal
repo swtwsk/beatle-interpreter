@@ -22,13 +22,13 @@ library
       ParBeatle
       AbsBeatle
       ErrM
+      Expr
       LayoutBeatle
       LexBeatle
-      PrintBeatle
       Interpreter
       Lambda
-      Types
       Utils
+      Values
   other-modules:
       Paths_beatle
   hs-source-dirs:

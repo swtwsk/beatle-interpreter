@@ -1,12 +1,9 @@
 module Lambda (
     Name,
-    Expr(..),
-    Pattern(..),
     Lit(..),
     BinOp(..),
     UnOp(..),
     Value(..),
-    TypeDef(..),
     ValMap,
     ConsMap,
     AlgTypeMap,
@@ -26,70 +23,9 @@ import qualified Data.Map as Map
 import Data.List (intercalate)
 import qualified Data.List as List
 
-import Types
+import Expr
 import Utils
-
-type Name = String
-
-data Expr = Var Name
-          | Lam Pattern Type Expr
-          | Lit Lit
-          | App Expr Expr
-          | Let Pattern Expr Expr
-          | LetRec [(Pattern, Type, Expr)] Expr
-          | If Expr Expr Expr
-          | BinOp BinOp Expr Expr
-          | UnOp UnOp Expr
-          | Cons Expr Expr                   -- list
-          | AlgCons Name [Expr]
-          | Case Name [(Pattern, Type, Expr)]
-
-data Pattern = PConst Lit            -- constant
-             | PVar Name             -- variable
-             | PCons Pattern Pattern -- list
-
-data Lit = LInt Integer
-         | LBool Bool
-         | LNil
-
-data BinOp = OpAdd | OpMul | OpSub | OpDiv | OpAnd | OpOr | OpEq | OpLT
-data UnOp = OpNeg | OpNot
-
-data Value = VInt Integer 
-           | VBool Bool 
-           | VClos Pattern Expr Env
-           | VFixed Pattern [(Pattern, Expr)] Env
-           | VCase Name [(Pattern, Expr)] Env
-           | VCons Value Value
-           | VNil
-           | VAlg Name TypeName [Value]
-
-data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
-
-type ValMap = Map.Map Name Value
-type TypeName = String
-type ConsMap = Map.Map Name (Int, TypeName)
-type AlgTypeMap = Map.Map TypeName TypeDef
-type TypeMap = Map.Map TypeName Type
-
-data Env = Env 
-    { _values :: ValMap
-    , _constructors :: ConsMap
-    , _algtypes  :: AlgTypeMap
-    , _types :: TypeMap }
-
-emptyEnv :: Env
-emptyEnv = Env { _values = Map.empty
-               , _constructors = Map.empty
-               , _algtypes = Map.empty
-               , _types = Map.empty }
-
-mergeEnv :: Env -> Env -> Env
-mergeEnv env1 env2 =
-    Env { _values = Map.union (_values env1) (_values env2) 
-        , _constructors = Map.union (_constructors env1) (_constructors env2)
-        , _algtypes = Map.union (_algtypes env1) (_algtypes env2) 
-        , _types = Map.union (_types env1) (_types env2) }
+import Values
 
 type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
@@ -394,68 +330,6 @@ checkType e t = do
     if t == t' then return t 
     else throwError $ "Type error: " ++ show e ++ " should be " ++ show t 
         ++ " but is of type " ++ show t'
-
------ SHOW INSTANCES -----
-instance Show Expr where
-    show (Var n) = n
-    show (Lam n t e) = "λ(" ++ show n ++ " : " ++ show t ++ ") -> " ++ show e
-    show (Lit l) = show l
-    show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
-    show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
-    show (LetRec l e) = 
-        "letrec " ++ 
-        List.intercalate " also " (map (\(n, _, e') -> show n ++ " = " 
-        ++ show e') l) ++ " in " ++ show e
-    show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
-        " else " ++ show e2
-    show (BinOp op e1 e2) = show e1 ++ " " ++ show op ++ " " ++ show e2
-    show (UnOp op e) = show op ++ " " ++ show e
-    show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
-    show (AlgCons n le) = n ++ " of (" ++ List.intercalate ", " (map show le) 
-        ++ ")"
-    show (Case n l) = "match " ++ n ++ " with { " ++ 
-        List.intercalate "; " (map (\(p, _, e) -> 
-            "case " ++ show p ++ " -> " ++ show e) l) ++ " }"
-
-instance Show Pattern where
-    show (PConst lit) = show lit
-    show (PVar n) = n
-    show p@(PCons _ _) = case p of
-        PCons p1 (PConst LNil) -> "[" ++ showLeftList p1 ++ "]"
-        PCons p1 p2 -> "[" ++ showLeftList p1 ++ ", " ++ showRightList p2 ++ "]"
-        where
-            showLeftList p = case p of
-                PCons p1 (PConst LNil) -> "[" ++ showLeftList p1 ++ "]"
-                PCons p1 p2 -> "[" ++ showLeftList p1 ++ ", " 
-                    ++ showRightList p2 ++ "]"
-                _ -> show p
-            showRightList p = case p of
-                PCons p1 (PConst LNil) -> showLeftList p1
-                PCons p1 p2 -> showLeftList p1 ++ ", " ++ showRightList p2
-                (PConst LNil) -> ""
-                _ -> "?"
-
-instance Show Lit where
-    show lit = case lit of
-        LInt i  -> show i
-        LBool b -> show b
-        LNil    -> "[]"
-
-instance Show BinOp where
-    show op = case op of
-        OpAdd -> "+"
-        OpMul -> "*"
-        OpSub -> "-"
-        OpDiv -> "/"
-        OpAnd -> "and"
-        OpOr  -> "or"
-        OpEq  -> "=="
-        OpLT  -> "<"
-
-instance Show UnOp where
-    show op = case op of
-        OpNeg -> "-"
-        OpNot -> "not"
 
 instance Show Value where
     show (VInt i) = show i 
