@@ -16,9 +16,10 @@ terminator Phrase ";;" ;
 
 Let.        LetDef   ::= "let" [LetBind] ;
 LetRec.     LetDef   ::= "letrec" [LetBind] ;
-ConstBind.  LetBind  ::= Pattern "=" Expr ;
-ProcBind.   LetBind  ::= ProcName [Pattern] RType "=" Expr ;
-separator nonempty Pattern "" ;
+ConstBind.  LetBind  ::= LetLVI "=" Expr ;
+ProcBind.   LetBind  ::= ProcName [LetLVI] RType "=" Expr ;
+LetLVI.     LetLVI   ::= LambdaVI ;
+separator nonempty LetLVI "" ;
 separator nonempty LetBind "also" ;
 
 PId.        Pattern5 ::= VIdent ;

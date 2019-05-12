@@ -121,12 +121,18 @@ instance Print LetDef where
 
 instance Print LetBind where
   prt i e = case e of
-    ConstBind pattern expr -> prPrec i 0 (concatD [prt 0 pattern, doc (showString "="), prt 0 expr])
-    ProcBind procname patterns rtype expr -> prPrec i 0 (concatD [prt 0 procname, prt 0 patterns, prt 0 rtype, doc (showString "="), prt 0 expr])
+    ConstBind letlvi expr -> prPrec i 0 (concatD [prt 0 letlvi, doc (showString "="), prt 0 expr])
+    ProcBind procname letlvis rtype expr -> prPrec i 0 (concatD [prt 0 procname, prt 0 letlvis, prt 0 rtype, doc (showString "="), prt 0 expr])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString "also"), prt 0 xs]
 
-instance Print [Pattern] where
+instance Print LetLVI where
+  prt i e = case e of
+    LetLVI lambdavi -> prPrec i 0 (concatD [prt 0 lambdavi])
+  prtList _ [x] = concatD [prt 0 x]
+  prtList _ (x:xs) = concatD [prt 0 x, prt 0 xs]
+
+instance Print [LetLVI] where
   prt = prtList
 
 instance Print [LetBind] where
@@ -163,8 +169,6 @@ instance Print Pattern where
   prtList 1 [] = concatD []
   prtList 1 [x] = concatD [prt 1 x]
   prtList 1 (x:xs) = concatD [prt 1 x, doc (showString ","), prt 1 xs]
-  prtList _ [x] = concatD [prt 0 x]
-  prtList _ (x:xs) = concatD [prt 0 x, prt 0 xs]
 
 instance Print Expr where
   prt i e = case e of

@@ -24,7 +24,10 @@ data LetDef = Let [LetBind] | LetRec [LetBind]
   deriving (Eq, Ord, Show, Read)
 
 data LetBind
-    = ConstBind Pattern Expr | ProcBind ProcName [Pattern] RType Expr
+    = ConstBind LetLVI Expr | ProcBind ProcName [LetLVI] RType Expr
+  deriving (Eq, Ord, Show, Read)
+
+data LetLVI = LetLVI LambdaVI
   deriving (Eq, Ord, Show, Read)
 
 data PNested = PAlgWild | PAlgList [Pattern]

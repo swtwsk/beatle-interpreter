@@ -5,6 +5,7 @@ module Interpreter where
 import System.Console.Haskeline
 import Control.Monad.State
 import Control.Monad.Except
+import Data.Functor.Identity
 import qualified Data.Map as Map
 
 import AbsBeatle
@@ -24,7 +25,7 @@ type Result = TransRes InterRes
 
 type IState = StateT Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(E.Pattern, E.Type, E.Expr)] | Rec [(E.Pattern, E.Type, E.Expr)]
+data Fun = Fun [(Name, E.SchemeMap, E.Expr)] | Rec [(Name, E.SchemeMap, E.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -43,32 +44,36 @@ interpretPhrase (Value letdef) = do
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
         Fun list -> do
-            _ <- either throwError return $
-                mapM (\(_, t, e') -> typeEqualCheck env e' t) list
+            let tmap   = map (\(_, s, _) -> s) list
+                tmap'  = foldr Map.union Map.empty tmap
+                tmap'' = Map.union tmap'' (_schemes env)
+                tenv   = env { _schemes = tmap'' }
+            either throwError return $ 
+                mapM (\(_, t, e') -> typeCheck env e') list
             either throwError return $ seqPair $ map (ev env) list
-        Rec list -> do
-            tlist <- mapM (either throwError return . extractVar) list
-            let tmap  = Map.fromList tlist
-                tmap' = Map.union tmap (_types env)
-                env'  = env { _types = tmap' }
-            _ <- either throwError return $ 
-                mapM (\(_, _, e') -> typeCheck env' e') list
-            return $ fixed env list
-            where
-                extractVar (E.PVar n, t, _) = pure (n, t)
-                extractVar _ = Left "Patterns in letrecs: Unimplemented"
+        Rec list -> throwError "Rec unimplemented"
+            -- do
+            -- tlist <- mapM (either throwError return . extractVar) list
+            -- let tmap  = Map.fromList tlist
+            --     tmap' = Map.union tmap (_schemes env)
+            --     env'  = env { _schemes = tmap' }
+            -- _ <- either throwError return $ 
+            --     mapM (\(_, _, e') -> typeCheck env' e') list
+            -- return $ fixed env list
+            -- where
+            --     extractVar (n, t, _) = pure (n, t)
     ms <- mapM (either throwError return . extractVar) m
     let m' = map (\(n, v, _) -> (n, v)) ms
-    let t' = map (\(n, _, t) -> (n, t)) ms
+    let t' = map (\(n, _, t) -> 
+            (n, E.generalize (E.GammaEnv $ _schemes env) t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
-              , _types  = Map.union (Map.fromList t') (_types env) }
+              , _schemes  = Map.union (Map.fromList t') (_schemes env) }
     extr <- return $ map extract m
     return . pure . InterVal $ extr
     where
         ev env (name, _, expr) = (name, eval env expr)
         extract (_, expr) = expr
-        extractVar (E.PVar n, (v, t)) = pure (n, v, t)
-        extractVar _ = Left "Patterns in letrecs: Unimplemented"
+        extractVar (n, (v, t)) = pure (n, v, t)
 interpretPhrase (TypeDecl typedef) = do
     env <- get
     ttd <- either throwError return $ translateTypeDef typedef
@@ -161,7 +166,8 @@ translateExpr (ELetIn letdef e) = do
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> pure $ E.LetRec list te
+        Rec list -> throwError "Rec not implemented"
+            -- pure $ E.LetRec list te
     where
         transLambda l e = case l of
             (n, _, fe):t -> E.Let n fe (transLambda t e)
@@ -176,12 +182,9 @@ translateExpr (ELambda vlist e) = do
     pure $ transLambda vlist te
     where 
         transLambda l e = case l of
-            (TypedVId (VIdent n) typ):t -> 
-                E.Lam (E.PVar n) (translateType typ) (transLambda t e)
-            -- STUPID PLACEHOLDER
-            (LambdaVId (VIdent n)):t -> E.Lam (E.PVar n) E.TInt (transLambda t e)
-            (WildVId):t -> E.Lam (E.PVar "_") E.TInt (transLambda t e)
+            h:t -> extract (translateLambdaVI h) (transLambda t e)
             [] -> e
+        extract (n, t) l = E.Lam (E.PVar n) t l
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
     pure . trans $ tlist
@@ -201,36 +204,77 @@ translateLetDef ld = case ld of
     LetRec letbinds -> 
         either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (E.Pattern, E.Type, E.Expr)
-translateLetBind (ConstBind p e) = do
-    tp <- translatePattern p
-    let (n, t) = tp
+translateLetBind :: LetBind -> TransRes (Name, E.SchemeMap, E.Expr)
+translateLetBind (ConstBind lvi e) = do
+    tlvi <- translateLetLVI lvi
+    let (n, t) = tlvi
+    let nt = E.TVar "a"
+        t' = Map.singleton n $ E.Scheme [] $ maybe nt id t
     te <- translateExpr e
-    pure (n, t, te)
-translateLetBind (ProcBind (ProcNameId (VIdent proc)) pl rt e) = do
-    tpl <- sequence $ map translatePattern pl
+    pure (n, t', te)
+translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
+    til <- sequence $ map translateLetLVI il
     te <- translateExpr e
-    trt <- case translateRetType rt of
-        Nothing -> Left "function return type not specified"
-        Just trt' -> pure trt'
-    let proctype = foldr (\(_, t) acc -> E.TFun t acc) trt tpl
-    pure (E.PVar proc, proctype, transLambda tpl te)
+    let trt = translateRetType rt
+        (vars, untyped) = giveTypeNames $ (map (\(_, t) -> t) til) ++ [trt]
+        (params, ret) = splitLast untyped
+        proctype = foldr (\t acc -> E.TFun t acc) ret params
+        scheme = E.Scheme vars proctype
+    pure (proc, Map.singleton proc scheme, transLambda til te)
     where
         transLambda l e = case l of
-            (n, typ):t  -> E.Lam n typ (transLambda t e)
+            (n, typ):t  -> E.Lam (E.PVar n) typ (transLambda t e)
             [] -> e
+        splitLast :: [a] -> ([a], a)
+        splitLast l = case l of
+            h:t -> let (init, last) = splitLast t in (h:init, last)
+            h:[] -> ([], h)
+        -- we may do splitLast because procedure has at least one argument
 
-translatePattern :: Pattern -> TransRes (E.Pattern, E.Type)
-translatePattern (PId (VIdent n)) = Left "Pattern: VIdent unimplemented"
-translatePattern (PTyped (PId (VIdent n)) t) = pure (E.PVar n, translateType t)
-translatePattern (PInt i) = pure (E.PConst $ LInt i, E.TInt)
-translatePattern PTrue = pure (E.PConst $ LBool True, E.TBool)
-translatePattern PFalse = pure (E.PConst $ LBool False, E.TBool)
+data TypeState = TypeState { _supply :: String, _vars :: [String] }
+type TypeNameState = StateT TypeState Identity E.Type
+
+emptyTypeState :: TypeState
+emptyTypeState = TypeState { _supply = "a",
+                             _vars   = ["a"] }
+
+freshName :: TypeNameState
+freshName = do
+    s <- get
+    let c@(h:t) = _supply s
+        next    = if h == 'z' then 'a':c else (succ h):t
+    put s { _supply = next, _vars = next:(_vars s) }
+    return $ E.TVar c
+
+giveTypeNames :: [Maybe E.Type] -> ([String], [E.Type])
+giveTypeNames l = 
+    let (res, st) = runState (mapM giveTypeNames' l) emptyTypeState in
+        ((_vars st), res)
+    where
+        giveTypeNames' :: Maybe E.Type -> TypeNameState
+        giveTypeNames' (Just t)  = return t
+        giveTypeNames' Nothing = freshName
+
+translateLetLVI :: LetLVI -> TransRes (Name, Maybe E.Type)
+translateLetLVI (LetLVI lvi) = pure $ translateLambdaVI lvi
+
+translateLambdaVI :: LambdaVI -> (Name, Maybe E.Type)
+translateLambdaVI (TypedVId (VIdent n) typ) = (n, pure $ translateType typ)
+translateLambdaVI (LambdaVId (VIdent n)) = (n, Nothing)
+translateLambdaVI (WildVId) = ("_", Nothing)
+
+translatePattern :: Pattern -> TransRes (E.Pattern, Maybe E.Type)
+translatePattern (PId (VIdent n)) = pure (E.PVar n, Nothing)
+translatePattern (PTyped (PId (VIdent n)) t) = 
+    pure (E.PVar n, pure $ translateType t)
+translatePattern (PInt i) = pure (E.PConst $ LInt i, pure E.TInt)
+translatePattern PTrue = pure (E.PConst $ LBool True, pure E.TBool)
+translatePattern PFalse = pure (E.PConst $ LBool False, pure E.TBool)
 translatePattern PWildcard = Left "Pattern: Wildcard unimplemented"
-translatePattern PListEmpty = Left "Pattern: cannot type empty list"
+translatePattern PListEmpty = pure (E.PConst LNil, Nothing)
 translatePattern _ = Left "Pattern: unimplemented"
 
-translateMatching :: Matching -> TransRes (E.Pattern, E.Type, E.Expr)
+translateMatching :: Matching -> TransRes (E.Pattern, Maybe E.Type, E.Expr)
 translateMatching (MatchCase (CPattern p) expr) = do
     tp <- translatePattern p
     let (n, t) = tp
@@ -252,7 +296,7 @@ translateType TInt = E.TInt
 translateType TBool = E.TBool
 translateType (TList t) = E.TList $ translateType t
 translateType (TAlgebraic (TIdent t)) = E.TAlg t
-translateType (TPoly (TPolyIdent t)) = E.TPoly t
+translateType (TPoly (TPolyIdent t)) = E.TVar t
 translateType (TFun t1 t2) = E.TFun (translateType t1) (translateType t2)
 
 translateRetType :: RType -> Maybe E.Type
