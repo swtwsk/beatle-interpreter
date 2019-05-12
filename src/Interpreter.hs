@@ -48,7 +48,7 @@ interpretPhrase (Value letdef) = do
                 tmap'  = foldr Map.union Map.empty tmap
                 tmap'' = Map.union tmap'' (_schemes env)
                 tenv   = env { _schemes = tmap'' }
-            either throwError return $ 
+            _ <- either throwError return $ 
                 mapM (\(_, t, e') -> typeCheck env e') list
             either throwError return $ seqPair $ map (ev env) list
         Rec list -> throwError "Rec unimplemented"
@@ -235,14 +235,14 @@ data TypeState = TypeState { _supply :: String, _vars :: [String] }
 type TypeNameState = StateT TypeState Identity E.Type
 
 emptyTypeState :: TypeState
-emptyTypeState = TypeState { _supply = "a",
-                             _vars   = ["a"] }
+emptyTypeState = TypeState { _supply = "\'a",
+                             _vars   = ["\'a"] }
 
 freshName :: TypeNameState
 freshName = do
     s <- get
     let c@(h:t) = _supply s
-        next    = if h == 'z' then 'a':c else (succ h):t
+        next    = if h == 'z' then "\'a" ++ c else '\'':(succ h):t
     put s { _supply = next, _vars = next:(_vars s) }
     return $ E.TVar c
 

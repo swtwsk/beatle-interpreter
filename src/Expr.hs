@@ -121,14 +121,14 @@ type TCM a = StateT TcState (Except String) a
 tcmFresh :: TCM Type
 tcmFresh = do
     s <- get
-    let c@(h:t) = _supply s
-        next    = if h == 'z' then 'a':c else (succ h):t
+    let c@(_:h:t) = _supply s
+        next    = if h == 'z' then "\'a" ++ c else '\'':(succ h):t
     put s { _supply = next }
     return $ TVar c
 
 runTCM :: TCM a -> Either String (a, TcState)
 runTCM t = runExcept $ runStateT t initState
-    where initState = TcState { _supply = "a", _subst = Map.empty }
+    where initState = TcState { _supply = "\'a", _subst = Map.empty }
 
 -- replace all bound type variables in a type scheme with fresh type variables
 instantiate :: Scheme -> TCM Type
@@ -265,7 +265,35 @@ instance TypeCheck Expr where
     -- lp :: [(Pattern, Type, Expr)]
     ti env (Case n []) = 
         throwError "Type: Unexpected error - empty pattern match"
-    ti env (Case n ((p, t0, e):t)) = throwError "Type: Case unimplemented"
+    ti env (Case n l) = do
+        (sn, tn)       <- ti env (Var n)
+        tl <- mapM (checkType (apply sn env)) l
+        (s', tp, te) <- foldM unifyTypes (head tl) (tail tl)
+        s1 <- unify (apply s' tn) tp
+        return (s1 `composeSubst` s' `composeSubst` sn, apply s1 te)
+        where
+            checkType :: GammaEnv -> (Pattern, Maybe Type, Expr) -> TCM (Subst, Type, Type)
+            checkType env (PVar n, t, e) = do
+                tv <- maybe tcmFresh return t
+                let GammaEnv env' = remove env n
+                    env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
+                (sp, tp) <- ti env'' (PVar n)
+                (se, te) <- ti (apply sp env'') e
+                return (se `composeSubst` sp, apply se tp, apply se te)
+            checkType env (PConst k, t, e) = do
+                (_, tk) <- ti env k
+                (s, te) <- case t of
+                    Nothing -> ti env e
+                    Just t' -> unify tk t' >> ti env e
+                return (s, tk, te)
+            checkType env (PCons p1 p2, t0, e) = throwError "Type: PCons unimplemented"
+            unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) -> TCM (Subst, Type, Type)
+            unifyTypes (s1, tp1, te1) (s2, tp2, te2) = do
+                let s' = s2 `composeSubst` s1
+                sp3 <- unify (apply s' tp2) tp1
+                let s'' = sp3 `composeSubst` s'
+                se3 <- unify (apply s'' te2) te1
+                return (se3 `composeSubst` s'', apply se3 tp1, apply se3 te1)
 
 instance TypeCheck Pattern where
     ti env (PConst k) = ti env k
