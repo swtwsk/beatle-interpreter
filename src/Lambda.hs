@@ -111,7 +111,7 @@ eval' (If cond e1 e2) = do
     c <- eval' cond
     case c of
         VBool b -> if b then eval' e1 else eval' e2
-        _ -> throwError boolTypeError
+        _ -> throwError "Unexpected error"
 
 eval' (BinOp op e1 e2) = do
     eval1 <- eval' e1
@@ -124,19 +124,14 @@ eval' (BinOp op e1 e2) = do
         binOp (VInt a) (VInt b) OpSub = return . VInt $ a - b
         binOp (VInt a) (VInt 0) OpDiv = throwError "Cannot divide by zero"
         binOp (VInt a) (VInt b) OpDiv = return . VInt $ a `div` b
-        binOp _ _ OpAdd = throwError intTypeError
-        binOp _ _ OpMul = throwError intTypeError
-        binOp _ _ OpSub = throwError intTypeError
-        binOp _ _ OpDiv = throwError intTypeError
         binOp (VBool a) (VBool b) OpAnd = return . VBool $ a && b
         binOp (VBool a) (VBool b) OpOr  = return . VBool $ a || b
         binOp (VBool a) (VBool b) OpEq  = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpEq    = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpLT    = return . VBool $ a < b
-        binOp _ _ OpEq  = throwError boolTypeError
-        binOp _ _ OpLT  = throwError boolTypeError
-        binOp _ _ OpAnd = throwError boolTypeError
-        binOp _ _ OpOr  = throwError boolTypeError
+        binOp _ _ OpEq  = 
+            throwError "Cannot test equality in types other than int and bool"
+        binOp _ _ _     = throwError "Unexpected error"
 
 eval' (UnOp op e) = do
     ev <- eval' e
@@ -144,9 +139,8 @@ eval' (UnOp op e) = do
     where 
         unOp :: Value -> UnOp -> Either String Value
         unOp (VInt v) OpNeg = return . VInt $ (-v)
-        unOp _ OpNeg = throwError intTypeError
         unOp (VBool b) OpNot = return . VBool $ not b
-        unOp _ OpNot = throwError boolTypeError
+        unOp _ _ = throwError "Unexpected error"
 
 eval' (Cons e1 e2) = do
     eval1 <- eval' e1
@@ -221,15 +215,6 @@ apply (VCase var l cenv) e2 env = workL l
         workL [] = Left MatchFail
 apply _ _ _ = 
     Left $ ApplyFail "Expression is not a function; it cannot be applied"
-
-typeError :: String -> String
-typeError t = "Expression was expected of type " ++ t
-
-intTypeError :: String
-intTypeError = typeError "int"
-
-boolTypeError :: String
-boolTypeError = typeError "bool"
 
 -- typeOf :: Expr -> TypeReader
 -- typeOf (Lit l) = case l of

@@ -219,7 +219,7 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
         (vars, untyped) = giveTypeNames $ (map (\(_, t) -> t) til) ++ [trt]
         (params, ret) = splitLast untyped
         proctype = foldr (\t acc -> E.TFun t acc) ret params
-        scheme = E.Scheme vars proctype
+        scheme = E.Scheme [] proctype
     pure (proc, Map.singleton proc scheme, transLambda til te)
     where
         transLambda l e = case l of

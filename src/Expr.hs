@@ -178,7 +178,7 @@ ti env (Lam (PVar n) t e) = do
     (s1, t1) <- ti env'' e
     return (s1, TFun (apply s1 tv) t1)
 ti env (Lam (PConst k) t e) = do
-    (sk, tk) <- tiLit k
+    (_, tk) <- tiLit k
     case t of
         Nothing -> ti env e
         Just t' -> unify tk t' >> ti env e
@@ -199,8 +199,44 @@ ti env (Let x e1 e2) = do
     return (s1 `composeSubst` s2, t2)
 -- LetRec [(Pattern, Type, Expr)] Expr
 ti env (LetRec lp e) = throwError "Type: Recursion unimplemented yet"
-ti env (If c e1 e2) = throwError "Type: If unimplemented yet"
-ti env (BinOp op e1 e2) = throwError "Type: BinOp unimplemented yet"
+ti env (If c e1 e2) = do
+    tv1 <- tcmFresh
+    tc' <- tcmFresh
+    (sc, tc) <- ti env c
+    sc' <- unify (TFun TBool (TFun tv1 (TFun tv1 tv1))) (TFun tc tc')
+    let sc'' = sc' `composeSubst` sc
+        tc'' = apply sc' tc'
+    (s1, t1) <- ti (apply sc'' env) e1
+    t1' <- tcmFresh
+    s1' <- unify (apply s1 tc'') (TFun t1 t1')
+    let s1'' = s1' `composeSubst` s1 `composeSubst` sc''
+        t1'' = apply s1' t1'
+    (s2, t2) <- ti (apply s1'' env) e2
+    t2' <- tcmFresh
+    s2' <- unify (apply s2 t1'') (TFun t2 t2')
+    return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' t2')
+ti env (BinOp op e1 e2) = case op of
+    OpAdd -> checkBinOpType TInt
+    OpMul -> checkBinOpType TInt
+    OpSub -> checkBinOpType TInt
+    OpDiv -> checkBinOpType TInt
+    OpAnd -> checkBinOpType TBool
+    OpOr  -> checkBinOpType TBool
+    OpEq  -> do
+        tv <- tcmFresh
+        (s, _) <- checkBinOpType tv
+        return (s, TBool)
+    OpLT  -> checkBinOpType TInt >>= \(s, _) -> return (s, TBool)
+    where
+        checkBinOpType :: Type -> TCM (Subst, Type)
+        checkBinOpType t = do
+            (s1, t1) <- ti env e1
+            s1u      <- unify t1 t  -- s1 = { t1: t }
+            let s' = s1u `composeSubst` s1
+            (s2, t2) <- ti (apply s' env) e2
+            s3       <- unify t2 t
+            let s = s3 `composeSubst` s2 `composeSubst` s'
+            return (s, t)
 ti env (UnOp op e) = throwError "Type: UnOp unimplemented yet"
 ti env (Cons e1 e2) = throwError "Type: Cons unimplemented yet"
 ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
@@ -227,8 +263,7 @@ checkType :: SchemeMap -> Expr -> Type -> Either String Type
 checkType sm e t = do
     (res, _) <- runTCM $ do
         t' <- typeInference sm e
-        unify t t'
-        return t
+        unify t t' >> return t
     return res
 
 ----- SHOW INSTANCES -----
