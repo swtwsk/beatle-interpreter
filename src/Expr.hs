@@ -158,109 +158,133 @@ varBind u t | t == TVar u = return emptySubst
                 ++ show t
             | otherwise = return (Map.singleton u t)
 
-tiLit :: Lit -> TCM (Subst, Type)
-tiLit l = do
-    t <- case l of
-        LInt _  -> return TInt
-        LBool _ -> return TBool
-        LNil    -> tcmFresh >>= return . TList
-    return (emptySubst, t)
+class TypeCheck a where
+    ti :: GammaEnv -> a -> TCM (Subst, Type)
 
-ti :: GammaEnv -> Expr -> TCM (Subst, Type)
-ti (GammaEnv env) (Var n) = case Map.lookup n env of
-    Nothing    -> throwError $ "Type: Unbound variable: " ++ n
-    Just sigma -> do
-        t <- instantiate sigma
+instance TypeCheck Lit where
+    ti _ l = do
+        t <- case l of
+            LInt _  -> return TInt
+            LBool _ -> return TBool
+            LNil    -> tcmFresh >>= return . TList
         return (emptySubst, t)
-ti env (Lam (PVar n) t e) = do
-    tv <- maybe tcmFresh return t
-    let GammaEnv env' = remove env n
-        env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
-    (s1, t1) <- ti env'' e
-    return (s1, TFun (apply s1 tv) t1)
-ti env (Lam (PConst k) t e) = do
-    (_, tk) <- tiLit k
-    case t of
-        Nothing -> ti env e
-        Just t' -> unify tk t' >> ti env e
-ti env (Lam (PCons p1 p2) t0 e) = throwError "Type: PCons unimplemented"
-ti env (Lit l) = tiLit l
-ti env (App e1 e2) = do
-    tv <- tcmFresh
-    (s1, t1) <- ti env e1
-    (s2, t2) <- ti (apply s1 env) e2
-    s3 <- unify (apply s2 t1) (TFun t2 tv)
-    return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
-ti env (Let x e1 e2) = do
-    (s1, t1) <- ti env e1
-    let GammaEnv env' = remove env x
-        t' = generalize (apply s1 env) t1
-        env'' = GammaEnv (Map.insert x t' env')
-    (s2, t2) <- ti (apply s1 env'') e2
-    return (s1 `composeSubst` s2, t2)
--- LetRec [(Pattern, Type, Expr)] Expr
-ti env (LetRec lp e) = throwError "Type: Recursion unimplemented yet"
-ti env (If c e1 e2) = do
-    tv1 <- tcmFresh
-    tc' <- tcmFresh
-    (sc, tc) <- ti env c
-    sc' <- unify (TFun TBool (TFun tv1 (TFun tv1 tv1))) (TFun tc tc')
-    let sc'' = sc' `composeSubst` sc
-        tc'' = apply sc' tc'
-    (s1, t1) <- ti (apply sc'' env) e1
-    t1' <- tcmFresh
-    s1' <- unify (apply s1 tc'') (TFun t1 t1')
-    let s1'' = s1' `composeSubst` s1 `composeSubst` sc''
-        t1'' = apply s1' t1'
-    (s2, t2) <- ti (apply s1'' env) e2
-    t2' <- tcmFresh
-    s2' <- unify (apply s2 t1'') (TFun t2 t2')
-    return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' t2')
-ti env (BinOp op e1 e2) = case op of
-    OpAdd -> checkBinOpType TInt
-    OpMul -> checkBinOpType TInt
-    OpSub -> checkBinOpType TInt
-    OpDiv -> checkBinOpType TInt
-    OpAnd -> checkBinOpType TBool
-    OpOr  -> checkBinOpType TBool
-    OpEq  -> do
+
+instance TypeCheck Expr where
+    ti (GammaEnv env) (Var n) = case Map.lookup n env of
+        Nothing -> throwError $ "Type: Unbound variable: " ++ n
+        Just sigma -> do
+            t <- instantiate sigma
+            return (emptySubst, t)
+    ti env (Lam (PVar n) t e) = do
+        tv <- maybe tcmFresh return t
+        let GammaEnv env' = remove env n
+            env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
+        (s1, t1) <- ti env'' e
+        return (s1, TFun (apply s1 tv) t1)
+    ti env (Lam (PConst k) t e) = do
+        (_, tk) <- ti env k
+        case t of
+            Nothing -> ti env e
+            Just t' -> unify tk t' >> ti env e
+    ti env (Lam (PCons p1 p2) t0 e) = throwError "Type: PCons unimplemented"
+    ti env (Lit l) = ti env l
+    ti env (App e1 e2) = do
         tv <- tcmFresh
-        (s, _) <- checkBinOpType tv
-        return (s, TBool)
-    OpLT  -> checkBinOpType TInt >>= \(s, _) -> return (s, TBool)
-    where
-        checkBinOpType :: Type -> TCM (Subst, Type)
-        checkBinOpType t = do
-            (s1, t1) <- ti env e1
-            s1u      <- unify t1 t  -- s1 = { t1: t }
-            let s' = s1u `composeSubst` s1
-            (s2, t2) <- ti (apply s' env) e2
-            s3       <- unify t2 t
-            let s = s3 `composeSubst` s2 `composeSubst` s'
-            return (s, t)
-ti env (UnOp op e) = case op of
-    OpNeg -> checkUnOpType TInt
-    OpNot -> checkUnOpType TBool
-    where
-        checkUnOpType :: Type -> TCM (Subst, Type)
-        checkUnOpType t = do
-            (s1, t1) <- ti env e
-            s2 <- unify t1 t
-            return (s2 `composeSubst` s1, t) 
-ti env (Cons e1 e2) = do
-    tv  <- tcmFresh
-    tv1 <- tcmFresh
-    (s1, t1) <- ti env e1
-    s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
-    let s1'' = s1' `composeSubst` s1
-        t1'' = apply s1' tv1
-    (s2, t2) <- ti (apply s1'' env) e2
-    tv2 <- tcmFresh
-    s2' <- unify (apply s2 t1'') (TFun t2 tv2)
-    return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
-ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
--- lp :: [(Pattern, Type, Expr)]
-ti env (Case n lp) = throwError "Type: Case unimplemented yet"
+        (s1, t1) <- ti env e1
+        (s2, t2) <- ti (apply s1 env) e2
+        s3 <- unify (apply s2 t1) (TFun t2 tv)
+        return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
+    ti env (Let x e1 e2) = do
+        (s1, t1) <- ti env e1
+        let GammaEnv env' = remove env x
+            t' = generalize (apply s1 env) t1
+            env'' = GammaEnv (Map.insert x t' env')
+        (s2, t2) <- ti (apply s1 env'') e2
+        return (s1 `composeSubst` s2, t2)
+    -- LetRec [(Pattern, Type, Expr)] Expr
+    ti env (LetRec lp e) = throwError "Type: Recursion unimplemented yet"
+    ti env (If c e1 e2) = do
+        tv1 <- tcmFresh
+        tc' <- tcmFresh
+        (sc, tc) <- ti env c
+        sc' <- unify (TFun TBool (TFun tv1 (TFun tv1 tv1))) (TFun tc tc')
+        let sc'' = sc' `composeSubst` sc
+            tc'' = apply sc' tc'
+        (s1, t1) <- ti (apply sc'' env) e1
+        t1' <- tcmFresh
+        s1' <- unify (apply s1 tc'') (TFun t1 t1')
+        let s1'' = s1' `composeSubst` s1 `composeSubst` sc''
+            t1'' = apply s1' t1'
+        (s2, t2) <- ti (apply s1'' env) e2
+        t2' <- tcmFresh
+        s2' <- unify (apply s2 t1'') (TFun t2 t2')
+        return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' t2')
+    ti env (BinOp op e1 e2) = case op of
+        OpAdd -> checkBinOpType TInt
+        OpMul -> checkBinOpType TInt
+        OpSub -> checkBinOpType TInt
+        OpDiv -> checkBinOpType TInt
+        OpAnd -> checkBinOpType TBool
+        OpOr  -> checkBinOpType TBool
+        OpEq  -> do
+            tv <- tcmFresh
+            (s, _) <- checkBinOpType tv
+            return (s, TBool)
+        OpLT  -> checkBinOpType TInt >>= \(s, _) -> return (s, TBool)
+        where
+            checkBinOpType :: Type -> TCM (Subst, Type)
+            checkBinOpType t = do
+                (s1, t1) <- ti env e1
+                s1u      <- unify t1 t  -- s1 = { t1: t }
+                let s' = s1u `composeSubst` s1
+                (s2, t2) <- ti (apply s' env) e2
+                s3       <- unify t2 t
+                let s = s3 `composeSubst` s2 `composeSubst` s'
+                return (s, t)
+    ti env (UnOp op e) = case op of
+        OpNeg -> checkUnOpType TInt
+        OpNot -> checkUnOpType TBool
+        where
+            checkUnOpType :: Type -> TCM (Subst, Type)
+            checkUnOpType t = do
+                (s1, t1) <- ti env e
+                s2 <- unify t1 t
+                return (s2 `composeSubst` s1, t) 
+    ti env (Cons e1 e2) = do
+        tv  <- tcmFresh
+        tv1 <- tcmFresh
+        (s1, t1) <- ti env e1
+        s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
+        let s1'' = s1' `composeSubst` s1
+            t1'' = apply s1' tv1
+        (s2, t2) <- ti (apply s1'' env) e2
+        tv2 <- tcmFresh
+        s2' <- unify (apply s2 t1'') (TFun t2 tv2)
+        return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
+    ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
+    -- lp :: [(Pattern, Type, Expr)]
+    ti env (Case n []) = 
+        throwError "Type: Unexpected error - empty pattern match"
+    ti env (Case n ((p, t0, e):t)) = throwError "Type: Case unimplemented"
+
+instance TypeCheck Pattern where
+    ti env (PConst k) = ti env k
+    ti (GammaEnv env) (PVar n) = case Map.lookup n env of
+        Nothing    -> throwError $ "Type: Unbound variable: " ++ n
+        Just sigma -> do
+            t <- instantiate sigma
+            return (emptySubst, t)
+    ti env (PCons p1 p2) = do
+        tv  <- tcmFresh
+        tv1 <- tcmFresh
+        (s1, t1) <- ti env p1
+        s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
+        let s1'' = s1' `composeSubst` s1
+            t1'' = apply s1' tv1
+        (s2, t2) <- ti (apply s1'' env) p2
+        tv2 <- tcmFresh
+        s2' <- unify (apply s2 t1'') (TFun t2 tv2)
+        return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
 
 typeInference :: Map.Map String Scheme -> Expr -> TCM Type
 typeInference env e = do

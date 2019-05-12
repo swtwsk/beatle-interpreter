@@ -72,7 +72,12 @@ eval' (Lam n t e) = do
 eval' (Case var l) = do
     env <- ask
     let l' = map (\(n, _, e) -> (n, e)) l
-    return (VCase var l' env)
+    val <- eval' (Var var)
+    either readApplyErr return $ apply (VCase var l' env) val env
+    where
+        readApplyErr :: ApplyErr -> EvalReader
+        readApplyErr (ApplyFail err) = throwError err
+        readApplyErr MatchFail = throwError "Non-exhaustive pattern match"
 
 eval' (Let n e1 e2) = do
     env <- ask
@@ -105,7 +110,7 @@ eval' (App e1 e2) = do
     where
         readApplyErr :: ApplyErr -> EvalReader
         readApplyErr (ApplyFail err) = throwError err
-        readApplyErr (MatchFail) = throwError "Match fail"
+        readApplyErr (MatchFail) = throwError "Non-exhaustive pattern match"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -307,7 +312,7 @@ apply _ _ _ =
 --     let ntenv = patToEnv p t0
 --     t1 <- local (\env -> ntenv env) (typeOf e)
 --     _  <- mapM_ (\(p, t, e) -> local (\e -> patToEnv p t e) (checkType e t0)) t
---     return $ TFun t0 t1
+--     return t1
 --     where
 --         patToEnv :: Pattern -> Type -> Env -> Env
 --         patToEnv (PConst _) _ env = env
