@@ -78,6 +78,7 @@ instance Types Type where
 
     apply s v@(TVar n)   = maybe v id $ Map.lookup n s
     apply s (TFun t1 t2) = TFun (apply s t1) (apply s t2)
+    apply s (TList t)    = TList (apply s t)
     apply s t            = t
 
 instance Types Scheme where
@@ -237,8 +238,26 @@ ti env (BinOp op e1 e2) = case op of
             s3       <- unify t2 t
             let s = s3 `composeSubst` s2 `composeSubst` s'
             return (s, t)
-ti env (UnOp op e) = throwError "Type: UnOp unimplemented yet"
-ti env (Cons e1 e2) = throwError "Type: Cons unimplemented yet"
+ti env (UnOp op e) = case op of
+    OpNeg -> checkUnOpType TInt
+    OpNot -> checkUnOpType TBool
+    where
+        checkUnOpType :: Type -> TCM (Subst, Type)
+        checkUnOpType t = do
+            (s1, t1) <- ti env e
+            s2 <- unify t1 t
+            return (s2 `composeSubst` s1, t) 
+ti env (Cons e1 e2) = do
+    tv  <- tcmFresh
+    tv1 <- tcmFresh
+    (s1, t1) <- ti env e1
+    s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
+    let s1'' = s1' `composeSubst` s1
+        t1'' = apply s1' tv1
+    (s2, t2) <- ti (apply s1'' env) e2
+    tv2 <- tcmFresh
+    s2' <- unify (apply s2 t1'') (TFun t2 tv2)
+    return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
 ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
 -- lp :: [(Pattern, Type, Expr)]
 ti env (Case n lp) = throwError "Type: Case unimplemented yet"
