@@ -94,7 +94,7 @@ separator nonempty Matching ";" ;
 separator nonempty LambdaVI "," ;
 coercions Expr 9 ;
 
-MatchCase.  Matching ::= "case" CasePat "->" Expr ;
+MatchCase.  Matching ::= "case" Pattern "->" Expr ;
 
 ProcNameId. ProcName ::= VIdent ;
 

@@ -224,7 +224,7 @@ instance Print [LambdaVI] where
 
 instance Print Matching where
   prt i e = case e of
-    MatchCase casepat expr -> prPrec i 0 (concatD [doc (showString "case"), prt 0 casepat, doc (showString "->"), prt 0 expr])
+    MatchCase pattern expr -> prPrec i 0 (concatD [doc (showString "case"), prt 0 pattern, doc (showString "->"), prt 0 expr])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ";"), prt 0 xs]
 

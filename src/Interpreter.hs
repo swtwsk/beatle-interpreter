@@ -94,7 +94,10 @@ translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
     pure $ E.App te1 te2
-translateExpr (ETyped _ _) = Left "Unimplemented"
+translateExpr (ETyped e t) = do
+    te <- translateExpr e
+    let tt = translateType t
+    pure $ E.Typed te tt
 translateExpr (ENeg e) = do
     te <- translateExpr e
     pure $ E.UnOp E.OpNeg te
@@ -263,24 +266,39 @@ translateLambdaVI (TypedVId (VIdent n) typ) = (n, pure $ translateType typ)
 translateLambdaVI (LambdaVId (VIdent n)) = (n, Nothing)
 translateLambdaVI (WildVId) = ("_", Nothing)
 
-translatePattern :: Pattern -> TransRes (E.Pattern, Maybe E.Type)
-translatePattern (PId (VIdent n)) = pure (E.PVar n, Nothing)
-translatePattern (PTyped (PId (VIdent n)) t) = 
-    pure (E.PVar n, pure $ translateType t)
-translatePattern (PInt i) = pure (E.PConst $ LInt i, pure E.TInt)
-translatePattern PTrue = pure (E.PConst $ LBool True, pure E.TBool)
-translatePattern PFalse = pure (E.PConst $ LBool False, pure E.TBool)
-translatePattern PWildcard = Left "Pattern: Wildcard unimplemented"
-translatePattern PListEmpty = pure (E.PConst LNil, Nothing)
-translatePattern _ = Left "Pattern: unimplemented"
-
-translateMatching :: Matching -> TransRes (E.Pattern, Maybe E.Type, E.Expr)
-translateMatching (MatchCase (CPattern p) expr) = do
+translatePattern :: Pattern -> TransRes E.Pattern
+translatePattern (PId (VIdent n)) = pure $ E.PVar n
+translatePattern (PTyped p t) = do
     tp <- translatePattern p
-    let (n, t) = tp
+    let tt = translateType t
+    pure $ E.PTyped tp tt
+translatePattern (PInt i) = pure . E.PConst $ LInt i
+translatePattern PTrue = pure . E.PConst $ LBool True
+translatePattern PFalse = pure . E.PConst $ LBool False
+translatePattern PWildcard = pure . E.PVar $ "_"
+translatePattern PListEmpty = pure . E.PConst $ LNil
+translatePattern (PTypeAlg t) = Left "Pattern: PTypeAlg unimplemented"
+translatePattern (PList plist) = do
+    tlist <- sequence $ map translatePattern plist
+    pure . trans $ tlist
+    where 
+        trans l = case l of
+            h:t -> E.PCons h (trans t)
+            []  -> E.PConst E.LNil
+translatePattern (PTypeAlgRec tid pnest) = 
+    Left "Pattern: PTypeAlgRec unimplemented"
+translatePattern (PNamedPat vid pat) = 
+    Left "Pattern: PNamedPat unimplemented"
+translatePattern (PListCons p1 p2) = do
+    tp1 <- translatePattern p1
+    tp2 <- translatePattern p2
+    pure $ E.PCons tp1 tp2
+
+translateMatching :: Matching -> TransRes (E.Pattern, E.Expr)
+translateMatching (MatchCase p expr) = do
+    tp <- translatePattern p
     te <- translateExpr expr
-    pure $ (n, t, te)
-translateMatching _ = Left "Matchcase: unimplemented"
+    pure $ (tp, te)
 
 translateTypeDef :: TypeDef -> TransRes (Name, V.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do

@@ -3,6 +3,7 @@ module Values where
 import Expr
 
 import qualified Data.Map as Map
+import Data.List (intercalate)
 
 data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
 
@@ -38,3 +39,29 @@ data Value = VInt Integer
            | VCons Value Value
            | VNil
            | VAlg Name TypeName [Value]
+
+instance Show Value where
+    show (VInt i) = show i 
+    show (VBool b) = show b
+    show (VClos n e _) = "<fun>"
+    show (VFixed _ l _) = "<fun>"
+    show v@(VCons _ _) = case v of
+        VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
+        VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
+        where
+            showLeftList v = case v of
+                VClos {} -> "<fun>"
+                VFixed {} -> "<fun>"
+                VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
+                VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " 
+                    ++ showRightList v2 ++ "]"
+                _ -> show v
+            showRightList v = case v of
+                VCons v1 VNil -> showLeftList v1
+                VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
+                VNil -> ""
+                _ -> "?"
+    show VNil = "[]"
+    show (VAlg name _ lv) = name ++ "(" ++ intercalate ", " (map show lv) 
+        ++ ")"
+    show (VCase n l _) = "<pattern-match>"

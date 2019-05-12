@@ -91,7 +91,7 @@ data Expr
 data LambdaVI = TypedVId VIdent Type | LambdaVId VIdent | WildVId
   deriving (Eq, Ord, Show, Read)
 
-data Matching = MatchCase CasePat Expr
+data Matching = MatchCase Pattern Expr
   deriving (Eq, Ord, Show, Read)
 
 data ProcName = ProcNameId VIdent

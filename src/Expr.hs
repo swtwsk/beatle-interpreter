@@ -36,11 +36,13 @@ data Expr = Var Name
           | UnOp UnOp Expr
           | Cons Expr Expr                   -- list
           | AlgCons Name [Expr]
-          | Case Name [(Pattern, Maybe Type, Expr)]
+          | Case Name [(Pattern, Expr)]
+          | Typed Expr Type
 
 data Pattern = PConst Lit            -- constant
              | PVar Name             -- variable
              | PCons Pattern Pattern -- list
+             | PTyped Pattern Type
 
 data Lit = LInt Integer
          | LBool Bool
@@ -187,6 +189,11 @@ instance TypeCheck Expr where
             Nothing -> ti env e
             Just t' -> unify tk t' >> ti env e
     ti env (Lam (PCons p1 p2) t0 e) = throwError "Type: PCons unimplemented"
+    ti env (Lam (PTyped p t) t0 e) = do
+        tv <- maybe tcmFresh return t0
+        s1 <- unify t tv
+        (s2, t2) <- ti (apply s1 env) (Lam p (pure tv) e)
+        return (s2 `composeSubst` s1, apply s2 tv)
     ti env (Lit l) = ti env l
     ti env (App e1 e2) = do
         tv <- tcmFresh
@@ -272,21 +279,27 @@ instance TypeCheck Expr where
         s1 <- unify (apply s' tn) tp
         return (s1 `composeSubst` s' `composeSubst` sn, apply s1 te)
         where
-            checkType :: GammaEnv -> (Pattern, Maybe Type, Expr) -> TCM (Subst, Type, Type)
-            checkType env (PVar n, t, e) = do
-                tv <- maybe tcmFresh return t
+            checkType :: GammaEnv -> (Pattern, Expr) -> TCM (Subst, Type, Type)
+            checkType env (PVar n, e) = do
+                tv <- tcmFresh
                 let GammaEnv env' = remove env n
                     env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
                 (sp, tp) <- ti env'' (PVar n)
                 (se, te) <- ti (apply sp env'') e
                 return (se `composeSubst` sp, apply se tp, apply se te)
-            checkType env (PConst k, t, e) = do
+            checkType env (PConst k, e) = do
                 (_, tk) <- ti env k
-                (s, te) <- case t of
-                    Nothing -> ti env e
-                    Just t' -> unify tk t' >> ti env e
+                (s, te) <- ti env e
                 return (s, tk, te)
-            checkType env (PCons p1 p2, t0, e) = throwError "Type: PCons unimplemented"
+            checkType env (PCons p1 p2, e) = throwError "Type: Case PCons unimplemented"
+            checkType env (PTyped p t, e) = do
+                let GammaEnv env' = remove env n
+                    env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] t)))
+                (sp, tp) <- ti env'' p
+                s <- unify tp t
+                let s' = s `composeSubst` sp
+                (se, te) <- ti (apply s' env'') e
+                return (se `composeSubst` s', apply se tp, apply se te)
             unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) -> TCM (Subst, Type, Type)
             unifyTypes (s1, tp1, te1) (s2, tp2, te2) = do
                 let s' = s2 `composeSubst` s1
@@ -294,6 +307,10 @@ instance TypeCheck Expr where
                 let s'' = sp3 `composeSubst` s'
                 se3 <- unify (apply s'' te2) te1
                 return (se3 `composeSubst` s'', apply se3 tp1, apply se3 te1)
+    ti env (Typed e t) = do
+        (s1, t1) <- ti env e
+        s2 <- unify t1 t
+        return (s2 `composeSubst` s1, apply s2 t1)
 
 instance TypeCheck Pattern where
     ti env (PConst k) = ti env k
@@ -313,6 +330,10 @@ instance TypeCheck Pattern where
         tv2 <- tcmFresh
         s2' <- unify (apply s2 t1'') (TFun t2 tv2)
         return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
+    ti env (PTyped p t) = do
+        (s1, t1) <- ti env p
+        s2 <- unify (apply s1 t1) t
+        return (s2 `composeSubst` s1, apply s2 t)
 
 typeInference :: Map.Map String Scheme -> Expr -> TCM Type
 typeInference env e = do
@@ -356,7 +377,7 @@ instance Show Expr where
     show (AlgCons n le) = n ++ " of (" ++ intercalate ", " (map show le) 
         ++ ")"
     show (Case n l) = "match " ++ n ++ " with { " ++ 
-        intercalate "; " (map (\(p, _, e) -> 
+        intercalate "; " (map (\(p, e) -> 
             "case " ++ show p ++ " -> " ++ show e) l) ++ " }"
 
 instance Show Pattern where

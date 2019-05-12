@@ -20,7 +20,6 @@ import Control.Monad.Reader
 import Control.Monad.Except
 
 import qualified Data.Map as Map
-import Data.List (intercalate)
 import qualified Data.List as List
 
 import Expr
@@ -71,9 +70,8 @@ eval' (Lam n t e) = do
 
 eval' (Case var l) = do
     env <- ask
-    let l' = map (\(n, _, e) -> (n, e)) l
     val <- eval' (Var var)
-    either readApplyErr return $ apply (VCase var l' env) val env
+    either readApplyErr return $ apply (VCase var l env) val env
     where
         readApplyErr :: ApplyErr -> EvalReader
         readApplyErr (ApplyFail err) = throwError err
@@ -169,6 +167,8 @@ eval' (AlgCons cname le) = do
             ++ " argument(s), but is applied to " 
             ++ show provided ++ " argument(s)"
 
+eval' (Typed e _) = eval' e
+
 data ApplyErr = ApplyFail String | MatchFail
 
 apply :: Value -> Value -> Env -> Either ApplyErr Value
@@ -188,6 +188,8 @@ apply (VClos (PVar x) e1 cenv) e2 env =
         runExcept $ runReaderT (eval' e1) nenv
 apply (VClos (PCons _ _) _ _) _ _ = 
     Left $ ApplyFail "Closure PCons: unimplemented"
+apply (VClos (PTyped p _) e1 cenv) e2 env = 
+    apply (VClos p e1 cenv) e2 env
 apply (VFixed fn l cenv) e2 env = case found of
     (_, Lam (PConst k) _ e1):_ -> do
         k' <- either (Left . ApplyFail) return . 
@@ -201,7 +203,9 @@ apply (VFixed fn l cenv) e2 env = case found of
     (_, Lam (PVar x) _ e1):_ -> either (Left . ApplyFail) return .
         runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
     (_, Lam (PCons _ _) _ _):_ -> 
-        Left $ ApplyFail "Closure PCons: unimplemented"
+        Left $ ApplyFail "Fixed PCons: unimplemented"
+    (_, Lam (PTyped _ _) _ _):_ ->
+        Left $ ApplyFail "Fixed PTyped: unimplemented"
     _ -> Left $ ApplyFail "Expression is not a function; it cannot be applied"
     where
         found = filter (\(n, _) -> n == fn) l
@@ -325,29 +329,3 @@ apply _ _ _ =
 --     if t == t' then return t 
 --     else throwError $ "Type error: " ++ show e ++ " should be " ++ show t 
 --         ++ " but is of type " ++ show t'
-
-instance Show Value where
-    show (VInt i) = show i 
-    show (VBool b) = show b
-    show (VClos n e _) = "<fun>"
-    show (VFixed _ l _) = "<fun>"
-    show v@(VCons _ _) = case v of
-        VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
-        VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " ++ showRightList v2 ++ "]"
-        where
-            showLeftList v = case v of
-                VClos {} -> "<fun>"
-                VFixed {} -> "<fun>"
-                VCons v1 VNil -> "[" ++ showLeftList v1 ++ "]"
-                VCons v1 v2 -> "[" ++ showLeftList v1 ++ ", " 
-                    ++ showRightList v2 ++ "]"
-                _ -> show v
-            showRightList v = case v of
-                VCons v1 VNil -> showLeftList v1
-                VCons v1 v2 -> showLeftList v1 ++ ", " ++ showRightList v2
-                VNil -> ""
-                _ -> "?"
-    show VNil = "[]"
-    show (VAlg name _ lv) = name ++ "(" ++ List.intercalate ", " (map show lv) 
-        ++ ")"
-    show (VCase n l _) = "<pattern-match>"
