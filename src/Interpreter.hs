@@ -187,7 +187,8 @@ translateExpr (ELambda vlist e) = do
         transLambda l e = case l of
             h:t -> extract (translateLambdaVI h) (transLambda t e)
             [] -> e
-        extract (n, t) l = E.Lam (E.PVar n) t l
+        extract (n, Just t) l = E.Lam (E.PTyped (E.PVar n) t) l
+        extract (n, _) l = E.Lam (E.PVar n) l
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
     pure . trans $ tlist
@@ -226,7 +227,9 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
     pure (proc, Map.singleton proc scheme, transLambda til te)
     where
         transLambda l e = case l of
-            (n, typ):t  -> E.Lam (E.PVar n) typ (transLambda t e)
+            (n, Just typ):t  -> 
+                E.Lam (E.PTyped (E.PVar n) typ) (transLambda t e)
+            (n, _):t  -> E.Lam (E.PVar n) (transLambda t e)
             [] -> e
         splitLast :: [a] -> ([a], a)
         splitLast l = case l of

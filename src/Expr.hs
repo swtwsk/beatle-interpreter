@@ -9,6 +9,7 @@ module Expr(
     Scheme(..),
     SchemeMap,
     GammaEnv(..),
+    Arity(..),
     inferType,
     inferTypeEnv,
     checkType,
@@ -26,7 +27,7 @@ import Data.Functor.Identity
 type Name = String
 
 data Expr = Var Name
-          | Lam Pattern (Maybe Type) Expr
+          | Lam Pattern Expr
           | Lit Lit
           | App Expr Expr
           | Let Name Expr Expr
@@ -59,6 +60,19 @@ data Type = TInt
           | TList Type
           | TAlg String
           deriving (Eq)
+
+class Arity a where
+    arity :: a -> Int
+
+instance Arity Expr where
+    arity (Cons _ (Lit LNil)) = 1
+    arity (Cons _ e2) = 1 + arity e2
+    arity _ = 0
+
+instance Arity Pattern where
+    arity (PCons _ (PConst LNil)) = 1
+    arity (PCons _ p2) = 1 + arity p2
+    arity _ = 0
 
 ----- TYPE INFERENCE -----
 --  Heavily inspired by 'Algorithm W Step by Step' by Martin Grabmuller
@@ -177,23 +191,19 @@ instance TypeCheck Expr where
         Just sigma -> do
             t <- instantiate sigma
             return (emptySubst, t)
-    ti env (Lam (PVar n) t e) = do
-        tv <- maybe tcmFresh return t
+    ti env (Lam (PVar n) e) = do
+        tv <- tcmFresh
         let GammaEnv env' = remove env n
             env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
         (s1, t1) <- ti env'' e
         return (s1, TFun (apply s1 tv) t1)
-    ti env (Lam (PConst k) t e) = do
-        (_, tk) <- ti env k
-        case t of
-            Nothing -> ti env e
-            Just t' -> unify tk t' >> ti env e
-    ti env (Lam (PCons p1 p2) t0 e) = throwError "Type: PCons unimplemented"
-    ti env (Lam (PTyped p t) t0 e) = do
-        tv <- maybe tcmFresh return t0
-        s1 <- unify t tv
-        (s2, t2) <- ti (apply s1 env) (Lam p (pure tv) e)
-        return (s2 `composeSubst` s1, apply s2 tv)
+    ti env (Lam (PConst k) e) = ti env k >> ti env e
+    ti _ (Lam (PCons _ _) _) = throwError "Type: PCons unimplemented"
+    ti env (Lam (PTyped p t) e) = do
+        tv <- tcmFresh
+        (s1, t1) <- ti env (Lam p e)
+        s2 <- unify (apply s1 (TFun t tv)) t1
+        return (s2 `composeSubst` s1, TFun (apply s2 t) (apply s2 tv))
     ti env (Lit l) = ti env l
     ti env (App e1 e2) = do
         tv <- tcmFresh
@@ -274,43 +284,68 @@ instance TypeCheck Expr where
         throwError "Type: Unexpected error - empty pattern match"
     ti env (Case n l) = do
         (sn, tn)       <- ti env (Var n)
-        tl <- mapM (checkType (apply sn env)) l
+        tl <- mapM (caseCheckType (apply sn env)) l
         (s', tp, te) <- foldM unifyTypes (head tl) (tail tl)
         s1 <- unify (apply s' tn) tp
         return (s1 `composeSubst` s' `composeSubst` sn, apply s1 te)
-        where
-            checkType :: GammaEnv -> (Pattern, Expr) -> TCM (Subst, Type, Type)
-            checkType env (PVar n, e) = do
-                tv <- tcmFresh
-                let GammaEnv env' = remove env n
-                    env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
-                (sp, tp) <- ti env'' (PVar n)
-                (se, te) <- ti (apply sp env'') e
-                return (se `composeSubst` sp, apply se tp, apply se te)
-            checkType env (PConst k, e) = do
-                (_, tk) <- ti env k
-                (s, te) <- ti env e
-                return (s, tk, te)
-            checkType env (PCons p1 p2, e) = throwError "Type: Case PCons unimplemented"
-            checkType env (PTyped p t, e) = do
-                let GammaEnv env' = remove env n
-                    env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] t)))
-                (sp, tp) <- ti env'' p
-                s <- unify tp t
-                let s' = s `composeSubst` sp
-                (se, te) <- ti (apply s' env'') e
-                return (se `composeSubst` s', apply se tp, apply se te)
-            unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) -> TCM (Subst, Type, Type)
-            unifyTypes (s1, tp1, te1) (s2, tp2, te2) = do
-                let s' = s2 `composeSubst` s1
-                sp3 <- unify (apply s' tp2) tp1
-                let s'' = sp3 `composeSubst` s'
-                se3 <- unify (apply s'' te2) te1
-                return (se3 `composeSubst` s'', apply se3 tp1, apply se3 te1)
     ti env (Typed e t) = do
         (s1, t1) <- ti env e
         s2 <- unify t1 t
         return (s2 `composeSubst` s1, apply s2 t1)
+
+caseCheckType :: GammaEnv -> (Pattern, Expr) -> TCM (Subst, Type, Type)
+caseCheckType env (PVar n, e) = do
+    tv <- tcmFresh
+    let GammaEnv env' = remove env n
+        env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
+    (sp, tp) <- ti env'' (PVar n)
+    (se, te) <- ti (apply sp env'') e
+    return (se `composeSubst` sp, apply se tp, apply se te)
+caseCheckType env (PConst k, e) = do
+    (_, tk) <- ti env k
+    (s, te) <- ti env e
+    return (s, tk, te)
+caseCheckType env (PTyped p t, e) = do
+    (sp, tp) <- ti env p
+    s <- unify tp t
+    let s' = s `composeSubst` sp
+    (se, te) <- ti (apply s' env) e
+    return (se `composeSubst` s', apply se tp, apply se te)
+caseCheckType env (PCons p1 p2, e) = do
+    tv  <- tcmFresh
+    tv1 <- tcmFresh
+    env' <- patEnv p1 env
+    (s1, t1) <- ti env' p1
+    s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
+    let s1'' = s1' `composeSubst` s1
+        t1'' = apply s1' tv1
+    env'' <- patEnv p2 env'
+    (s2, t2) <- ti (apply s1'' env'') p2
+    tv2 <- tcmFresh
+    s2' <- unify (apply s2 t1'') (TFun t2 tv2)
+    let sr = s2' `composeSubst` s2 `composeSubst` s1''
+    (se, te) <- ti (apply sr env'') e
+    return (se `composeSubst` sr, apply se tv2, apply se te)
+
+patEnv :: Pattern -> GammaEnv -> TCM GammaEnv
+patEnv (PVar n) env = do
+    tv <- tcmFresh
+    let GammaEnv env' = remove env n
+    return $ GammaEnv $ env' `Map.union` (Map.singleton n (Scheme [] tv))
+patEnv (PConst _) env = return env
+patEnv (PCons p1 p2) env = do
+    te1 <- patEnv p1 env
+    throwError "PatEnv: Unimplemented"
+patEnv (PTyped p t) env = throwError "PatEnv: Unimplemented"
+
+unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) 
+    -> TCM (Subst, Type, Type)
+unifyTypes (s1, tp1, te1) (s2, tp2, te2) = do
+    let s' = s2 `composeSubst` s1
+    sp3 <- unify (apply s' tp2) tp1
+    let s'' = sp3 `composeSubst` s'
+    se3 <- unify (apply s'' te2) te1
+    return (se3 `composeSubst` s'', apply se3 tp1, apply se3 te1)
 
 instance TypeCheck Pattern where
     ti env (PConst k) = ti env k
@@ -361,7 +396,7 @@ checkType sm e t = do
 ----- SHOW INSTANCES -----
 instance Show Expr where
     show (Var n) = n
-    show (Lam n t e) = "λ(" ++ show n ++ " : " ++ show t ++ ") -> " ++ show e
+    show (Lam n e) = "λ" ++ show n ++ " -> " ++ show e
     show (Lit l) = show l
     show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
     show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2

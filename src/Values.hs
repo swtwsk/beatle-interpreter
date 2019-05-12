@@ -40,6 +40,11 @@ data Value = VInt Integer
            | VNil
            | VAlg Name TypeName [Value]
 
+instance Arity Value where
+    arity (VCons _ VNil) = 1
+    arity (VCons _ v2) = 1 + arity v2
+    arity _ = 0
+
 instance Show Value where
     show (VInt i) = show i 
     show (VBool b) = show b

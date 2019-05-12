@@ -64,7 +64,7 @@ eval' (Var var) = do
     let vmap = _values env
     maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var vmap)
 
-eval' (Lam n t e) = do
+eval' (Lam n e) = do
     env <- ask
     return (VClos n e env)
 
@@ -72,10 +72,6 @@ eval' (Case var l) = do
     env <- ask
     val <- eval' (Var var)
     either readApplyErr return $ apply (VCase var l env) val env
-    where
-        readApplyErr :: ApplyErr -> EvalReader
-        readApplyErr (ApplyFail err) = throwError err
-        readApplyErr MatchFail = throwError "Non-exhaustive pattern match"
 
 eval' (Let n e1 e2) = do
     env <- ask
@@ -105,10 +101,6 @@ eval' (App e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
     either readApplyErr return $ apply eval1 eval2 env
-    where
-        readApplyErr :: ApplyErr -> EvalReader
-        readApplyErr (ApplyFail err) = throwError err
-        readApplyErr (MatchFail) = throwError "Non-exhaustive pattern match"
 
 eval' (If cond e1 e2) = do
     c <- eval' cond
@@ -186,12 +178,30 @@ apply (VClos (PVar x) e1 cenv) e2 env =
         _values=Map.insert x e2 $ _values cenv
     } in either (Left . ApplyFail) return . 
         runExcept $ runReaderT (eval' e1) nenv
-apply (VClos (PCons _ _) _ _) _ _ = 
-    Left $ ApplyFail "Closure PCons: unimplemented"
+apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
+    let arityp = arity p
+        aritye = arity e2
+    _ <- if arityp > aritye then (Left MatchFail) else return ()
+    e1' <- unpackp p (arityp - 1)
+    let e2'  = unpackv e2 arityp
+        venv = Map.fromList $ zip e1' e2'
+        nenv = (mergeEnv cenv env) {
+            _values = Map.union venv $ _values cenv
+        }
+    either (Left . ApplyFail) return $ runExcept $ runReaderT (eval' e1) nenv
+    where
+        unpackp :: Pattern -> Int -> Either ApplyErr [Name]
+        unpackp (PCons (PVar p1) p2) len = if len <= 0 then return [p1]
+            else do { p2' <- unpackp p2 (len - 1); return $ p1 : p2'}
+        unpackp (PCons {}) _ = Left . ApplyFail $ 
+            "List patterns that aren't variables are forbidden"
+        unpackv (VCons e1 e2) len = 
+            if len > 0 then e1 : (unpackv e2 $ len - 1) else e1 : [e2]
+        
 apply (VClos (PTyped p _) e1 cenv) e2 env = 
     apply (VClos p e1 cenv) e2 env
 apply (VFixed fn l cenv) e2 env = case found of
-    (_, Lam (PConst k) _ e1):_ -> do
+    (_, Lam (PConst k) e1):_ -> do
         k' <- either (Left . ApplyFail) return . 
             runExcept $ runReaderT (eval' (Lit k)) cenv
         let cond = case (k', e2) of (VInt i1, VInt i2) -> i1 == i2
@@ -200,11 +210,11 @@ apply (VFixed fn l cenv) e2 env = case found of
                                     _ -> False
         if cond then either (Left . ApplyFail) return .
             runExcept $ runReaderT (eval' e1) (nenv $ kmap) else Left MatchFail
-    (_, Lam (PVar x) _ e1):_ -> either (Left . ApplyFail) return .
+    (_, Lam (PVar x) e1):_ -> either (Left . ApplyFail) return .
         runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
-    (_, Lam (PCons _ _) _ _):_ -> 
+    (_, Lam (PCons _ _) _):_ -> 
         Left $ ApplyFail "Fixed PCons: unimplemented"
-    (_, Lam (PTyped _ _) _ _):_ ->
+    (_, Lam (PTyped _ _) _):_ ->
         Left $ ApplyFail "Fixed PTyped: unimplemented"
     _ -> Left $ ApplyFail "Expression is not a function; it cannot be applied"
     where
@@ -224,6 +234,10 @@ apply (VCase var l cenv) e2 env = workL l
         workL [] = Left MatchFail
 apply _ _ _ = 
     Left $ ApplyFail "Expression is not a function; it cannot be applied"
+
+readApplyErr :: ApplyErr -> EvalReader
+readApplyErr (ApplyFail err) = throwError err
+readApplyErr MatchFail = throwError "Non-exhaustive pattern match"
 
 -- typeOf :: Expr -> TypeReader
 -- typeOf (Lit l) = case l of
