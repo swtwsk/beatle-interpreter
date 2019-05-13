@@ -29,9 +29,8 @@ import Values
 type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: Env -> [(Name, Maybe Type, Expr)] -> [(Name, (Value, Maybe Type))]
-fixed env l = map (\(n, t, _) -> (n, (VFixed n l' env, t))) l
-    where l' = map (\(n, _, e) -> (n, e)) l
+fixed :: Env -> [(Name, Expr)] -> [(Name, Value)]
+fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
@@ -87,14 +86,12 @@ eval' (Let n e1 e2) = do
 eval' (LetRec l e) = do
     env <- ask
     let vmap = _values env
-    prepVals <- mapM (either throwError return . extractVar) $ fixed env l
+    prepVals <- return $ fixed env l
     let nmap = Map.fromList prepVals
     either throwError return $ ev (env {_values=Map.union nmap vmap})
     where
         ev :: Env -> Either String Value
         ev env = runExcept $ runReaderT (eval' e) env
-        extractVar :: (Name, (Value, Maybe Type)) -> Either String (Name, Value)
-        extractVar (n, (v, _)) = pure (n, v)
 
 eval' (App e1 e2) = do
     env <- ask

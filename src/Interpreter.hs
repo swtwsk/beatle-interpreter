@@ -169,8 +169,7 @@ translateExpr (ELetIn letdef e) = do
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> throwError "Rec not implemented"
-            -- pure $ E.LetRec list te
+        Rec list -> pure $ E.LetRec (map (\(n, sch, e) -> (n, e)) list) te
     where
         transLambda l e = case l of
             (n, _, fe):t -> E.Let n fe (transLambda t e)
@@ -233,8 +232,8 @@ translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
             [] -> e
         splitLast :: [a] -> ([a], a)
         splitLast l = case l of
-            h:t -> let (init, last) = splitLast t in (h:init, last)
             h:[] -> ([], h)
+            h:t -> let (init, last) = splitLast t in (h:init, last)
         -- we may do splitLast because procedure has at least one argument
 
 data TypeState = TypeState { _supply :: String, _vars :: [String] }

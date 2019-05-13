@@ -31,7 +31,7 @@ data Expr = Var Name
           | Lit Lit
           | App Expr Expr
           | Let Name Expr Expr
-          | LetRec [(Name, Maybe Type, Expr)] Expr
+          | LetRec [(Name, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
@@ -139,7 +139,7 @@ tcmFresh :: TCM Type
 tcmFresh = do
     s <- get
     let c@(_:h:t) = _supply s
-        next    = if h == 'z' then "\'a" ++ c else '\'':(succ h):t
+        next    = if h == 'z' then "\'a" ++ (h:t) else '\'':(succ h):t
     put s { _supply = next }
     return $ TVar c
 
@@ -219,8 +219,36 @@ instance TypeCheck Expr where
             env'' = GammaEnv (Map.insert x t' env')
         (s2, t2) <- ti (apply s1 env'') e2
         return (s1 `composeSubst` s2, t2)
-    -- LetRec [(Pattern, Type, Expr)] Expr
-    ti env (LetRec lp e) = throwError "Type: Recursion unimplemented yet"
+    ti env (LetRec l e) = do
+        tv <- tcmFresh
+        let tfix = 
+                TFun (foldr (\_ acc -> TFun tv acc) (TFun tv tv) (tail l)) tv
+            GammaEnv env' = remove env "fix"
+            env'' = GammaEnv $ 
+                env' `Map.union` (Map.singleton "fix" (Scheme [] tfix))
+            yfs = map (\(n, e) -> ("_y_" ++ n, transLambda l e)) l
+            ys  = 
+                map (\(n, _) -> transYLambda yfs (App (Var "fix") (Var n))) yfs
+        ss <- mapM (ti env'') ys
+        let s = foldr (\(s, _) acc -> s `composeSubst` acc) Map.empty ss
+        s1 <- foldM (unificator tv) s ss
+        -- return (s, t1)
+        let t1 = apply s1 tv
+            xs = map fst l
+            GammaEnv env2' = foldr (\x env -> remove env x) env'' xs
+            t' = generalize (apply s1 env) t1
+            env2'' = GammaEnv $ foldr (\x env -> Map.insert x t' env) env2' xs
+        (s2, t2) <- ti (apply s1 env2'') e
+        return (s1 `composeSubst` s2, t2)
+        where
+            transLambda ((n,_):t) e = Lam (PVar n) $ transLambda t e
+            transLambda [] e = e
+            transYLambda ((n,e):t) e' = Let n e (transYLambda t e')
+            transYLambda [] e' = e'
+            unificator tv s (_, t) = do
+                unified <- unify (apply s tv) t
+                return $ unified `composeSubst` s
+
     ti env (If c e1 e2) = do
         tv1 <- tcmFresh
         tc' <- tcmFresh
@@ -421,7 +449,7 @@ instance Show Expr where
     show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
     show (LetRec l e) = 
         "letrec " ++ 
-        intercalate " also " (map (\(n, _, e') -> show n ++ " = " 
+        intercalate " also " (map (\(n, e') -> show n ++ " = " 
         ++ show e') l) ++ " in " ++ show e
     show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
         " else " ++ show e2
