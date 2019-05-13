@@ -209,7 +209,7 @@ instance TypeCheck Expr where
     ti env (Lam (PConst k) e) = ti env k >> ti env e
     ti _ (Lam (PCons _ _) _) = throwError "Type: PCons unimplemented"
     ti env (Lit l) = ti env l
-    ti env e@(App e1 e2) = do
+    ti env (App e1 e2) = do
         tv <- tcmFresh
         (s1, t1) <- ti env e1
         (s2, t2) <- ti (apply s1 env) e2
@@ -281,16 +281,10 @@ instance TypeCheck Expr where
                 s2 <- unify t1 t
                 return (s2 `composeSubst` s1, t) 
     ti env (Cons e1 e2) = do
-        tv  <- tcmFresh
-        tv1 <- tcmFresh
         (s1, t1) <- ti env e1
-        s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
-        let s1'' = s1' `composeSubst` s1
-            t1'' = apply s1' tv1
-        (s2, t2) <- ti (apply s1'' env) e2
-        tv2 <- tcmFresh
-        s2' <- unify (apply s2 t1'') (TFun t2 tv2)
-        return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
+        (s2, t2) <- ti (apply s1 env) e2
+        s3 <- unify (apply s2 (TList t1)) t2
+        return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 t2)
     ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
     ti env (Case n l) = do
         (sn, tn)       <- ti env (Var n)
@@ -315,7 +309,7 @@ caseCheckType env (PConst k, e) = do
     (_, tk) <- ti env k
     (s, te) <- ti env e
     return (s, tk, te)
-caseCheckType env (p@(PCons p1 p2), e) = do
+caseCheckType env (PCons p1 p2, e) = do
     env' <- patEnv p1 Nothing env
     (s1, t1) <- ti env' p1
     env'' <- patEnv p2 Nothing env'

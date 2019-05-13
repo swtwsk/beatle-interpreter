@@ -53,8 +53,7 @@ interpretPhrase (Value letdef) = do
                 zipType [] _ = []
     ms <- mapM (either throwError return . extractVar) m
     let m' = map (\(n, v, _) -> (n, v)) ms
-    let t' = map (\(n, _, t) -> 
-            (n, E.generalize (E.GammaEnv $ _schemes env) t)) ms
+    let t' = map (\(n, _, t) -> (n, E.Scheme [] t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
     extr <- return $ map (\(n, v, t) -> (pure n, v, t)) ms
