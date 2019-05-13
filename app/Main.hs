@@ -2,23 +2,17 @@ module Main where
 
 import LexBeatle
 import ParBeatle
-import AbsBeatle
 import LayoutBeatle
 import Interpreter
-
+import Values
 import ErrM
 
 import Control.Monad (unless)
 import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
-import Data.Maybe
 import Data.List (intercalate)
 import System.Console.Haskeline
-
-import qualified Data.Map as Map
-
-import Lambda hiding (Expr(..))
 
 title :: [String]
 title = 
@@ -51,7 +45,6 @@ process line = do
     case res of
         (Bad s) -> unless (null line) $ liftIO $ putStrLn $ "err: " ++ s
         (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
-        -- (Ok s) -> print $ map eitherFunc (interpretLine s)
         
 run :: IO ()
 run = runInputT defaultSettings (runExceptT $ runStateT loop emptyEnv) >>= rerun run

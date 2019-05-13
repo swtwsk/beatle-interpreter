@@ -143,13 +143,6 @@ instance Print PNested where
     PAlgWild -> prPrec i 0 (concatD [doc (showString "_")])
     PAlgList patterns -> prPrec i 0 (concatD [doc (showString "("), prt 1 patterns, doc (showString ")")])
 
-instance Print CasePat where
-  prt i e = case e of
-    CPattern pattern -> prPrec i 0 (concatD [prt 4 pattern])
-    CTypeAlgRec tident pnested -> prPrec i 0 (concatD [prt 0 tident, prt 0 pnested])
-    CNamedPat vident pattern -> prPrec i 0 (concatD [prt 0 vident, doc (showString "@"), prt 4 pattern])
-    CListCons pattern1 pattern2 -> prPrec i 0 (concatD [prt 5 pattern1, doc (showString "::"), prt 1 pattern2])
-
 instance Print Pattern where
   prt i e = case e of
     PId vident -> prPrec i 5 (concatD [prt 0 vident])
@@ -162,7 +155,6 @@ instance Print Pattern where
     PTyped pattern type_ -> prPrec i 5 (concatD [doc (showString "("), prt 0 pattern, doc (showString ":"), prt 0 type_, doc (showString ")")])
     PList patterns -> prPrec i 4 (concatD [doc (showString "["), prt 4 patterns, doc (showString "]")])
     PTypeAlgRec tident pnested -> prPrec i 3 (concatD [doc (showString "("), prt 0 tident, prt 0 pnested, doc (showString ")")])
-    PNamedPat vident pattern -> prPrec i 2 (concatD [prt 0 vident, doc (showString "@"), prt 4 pattern])
     PListCons pattern1 pattern2 -> prPrec i 1 (concatD [prt 5 pattern1, doc (showString "::"), prt 1 pattern2])
   prtList 4 [x] = concatD [prt 4 x]
   prtList 4 (x:xs) = concatD [prt 4 x, doc (showString ","), prt 4 xs]

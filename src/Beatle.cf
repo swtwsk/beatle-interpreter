@@ -32,16 +32,10 @@ PTypeAlg.   Pattern5 ::= TIdent ;
 PTyped.     Pattern5 ::= "(" Pattern ":" Type ")" ;
 PList.      Pattern4 ::= "[" [Pattern4] "]" ;
 PTypeAlgRec.Pattern3 ::= "(" TIdent PNested ")";
-PNamedPat.  Pattern2 ::= VIdent "@" Pattern4 ; 
 PListCons.  Pattern1 ::= Pattern5 "::" Pattern1 ;
 
 PAlgWild.   PNested  ::= "_" ;
 PAlgList.   PNested  ::= "(" [Pattern1] ")" ;
-
-CPattern.   CasePat  ::= Pattern4 ;
-CTypeAlgRec.CasePat  ::= TIdent PNested;
-CNamedPat.  CasePat  ::= VIdent "@" Pattern4 ;
-CListCons.  CasePat  ::= Pattern5 "::" Pattern1 ;
 
 separator nonempty Pattern4 "," ;
 separator Pattern1 "," ;

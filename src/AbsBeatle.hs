@@ -33,13 +33,6 @@ data LetLVI = LetLVI LambdaVI
 data PNested = PAlgWild | PAlgList [Pattern]
   deriving (Eq, Ord, Show, Read)
 
-data CasePat
-    = CPattern Pattern
-    | CTypeAlgRec TIdent PNested
-    | CNamedPat VIdent Pattern
-    | CListCons Pattern Pattern
-  deriving (Eq, Ord, Show, Read)
-
 data Pattern
     = PId VIdent
     | PInt Integer
@@ -51,7 +44,6 @@ data Pattern
     | PTyped Pattern Type
     | PList [Pattern]
     | PTypeAlgRec TIdent PNested
-    | PNamedPat VIdent Pattern
     | PListCons Pattern Pattern
   deriving (Eq, Ord, Show, Read)
 

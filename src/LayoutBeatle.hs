@@ -225,34 +225,33 @@ sToken p s = PT p (TS s i)
       "==" -> 18
       ">" -> 19
       ">=" -> 20
-      "@" -> 21
-      "Bool" -> 22
-      "False" -> 23
-      "Int" -> 24
-      "True" -> 25
-      "[" -> 26
-      "[]" -> 27
-      "\\" -> 28
-      "]" -> 29
-      "_" -> 30
-      "also" -> 31
-      "and" -> 32
-      "case" -> 33
-      "else" -> 34
-      "if" -> 35
-      "in" -> 36
-      "let" -> 37
-      "letrec" -> 38
-      "match" -> 39
-      "not" -> 40
-      "of" -> 41
-      "or" -> 42
-      "then" -> 43
-      "type" -> 44
-      "with" -> 45
-      "{" -> 46
-      "|" -> 47
-      "}" -> 48
+      "Bool" -> 21
+      "False" -> 22
+      "Int" -> 23
+      "True" -> 24
+      "[" -> 25
+      "[]" -> 26
+      "\\" -> 27
+      "]" -> 28
+      "_" -> 29
+      "also" -> 30
+      "and" -> 31
+      "case" -> 32
+      "else" -> 33
+      "if" -> 34
+      "in" -> 35
+      "let" -> 36
+      "letrec" -> 37
+      "match" -> 38
+      "not" -> 39
+      "of" -> 40
+      "or" -> 41
+      "then" -> 42
+      "type" -> 43
+      "with" -> 44
+      "{" -> 45
+      "|" -> 46
+      "}" -> 47
       _ -> error $ "not a reserved word: " ++ show s
 
 -- | Get the position of a token.

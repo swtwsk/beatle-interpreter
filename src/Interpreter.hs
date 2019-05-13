@@ -277,8 +277,6 @@ translatePattern (PList plist) = do
             []  -> E.PConst E.LNil
 translatePattern (PTypeAlgRec tid pnest) = 
     Left "Pattern: PTypeAlgRec unimplemented"
-translatePattern (PNamedPat vid pat) = 
-    Left "Pattern: PNamedPat unimplemented"
 translatePattern (PListCons p1 p2) = do
     tp1 <- translatePattern p1
     tp2 <- translatePattern p2
