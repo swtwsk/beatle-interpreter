@@ -42,7 +42,8 @@ eitherFunc (Right (InterType tn l)) =
         showType (name, tlist) = name ++ " " ++ unwords (map show tlist)
 eitherFunc (Right (InterVal l)) = return $ map showVal l
     where
-        showVal (val, t) = "- : " ++ show t ++ " = " ++ show val
+        showVal (name, val, t) = (maybe "-" id name) ++ " : " ++ show t 
+            ++ " = " ++ show val
 
 process :: String -> IState ()
 process line = do

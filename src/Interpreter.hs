@@ -17,7 +17,7 @@ import qualified Values as V
 import qualified Expr as E
 
 
-data InterRes = InterVal [(Value, E.Type)]
+data InterRes = InterVal [(Maybe Name, Value, E.Type)]
               | InterType Name [(Name, [E.Type])]
 
 type TransRes = Either String
@@ -38,7 +38,7 @@ interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     env <- get
     ev <- return $ either Left (eval env) $ translateExpr e
-    return $ either Left (\n -> return $ InterVal [n]) $ ev
+    return $ either Left (\(v, t) -> return $ InterVal [(Nothing, v, t)]) $ ev
 interpretPhrase (Value letdef) = do
     env <- get
     let vmap = _values env
@@ -58,7 +58,7 @@ interpretPhrase (Value letdef) = do
             (n, E.generalize (E.GammaEnv $ _schemes env) t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
-    extr <- return $ map snd m
+    extr <- return $ map (\(n, v, t) -> (pure n, v, t)) ms
     return . pure . InterVal $ extr
     where
         ev env (name, t, expr) = (name, case t of
