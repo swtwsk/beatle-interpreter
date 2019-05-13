@@ -78,7 +78,7 @@ instance Arity Pattern where
 ----- TYPE INFERENCE -----
 --  Heavily inspired by 'Algorithm W Step by Step' by Martin Grabmuller
 --------------------------
-data Scheme = Scheme [String] Type
+data Scheme = Scheme [String] Type deriving (Show)
 type Subst = Map.Map String Type
 
 class Types a where
@@ -116,7 +116,7 @@ composeSubst :: Subst -> Subst -> Subst
 composeSubst s1 s2 = (Map.map (apply s1) s2) `Map.union` s1
 
 type SchemeMap = Map.Map String Scheme
-newtype GammaEnv = GammaEnv SchemeMap
+newtype GammaEnv = GammaEnv SchemeMap deriving (Show)
 remove :: GammaEnv -> String -> GammaEnv
 remove (GammaEnv env) var = GammaEnv $ Map.delete var env
 
@@ -131,7 +131,7 @@ generalize env t = Scheme vars t
     where vars = Set.toList (Set.difference (ftv t) (ftv env))
 
 data TcState = TcState { _supply :: String
-                       , _subst  :: Subst  }
+                       , _subst  :: Subst  } deriving (Show)
 
 type TCM a = StateT TcState (Except String) a
 
@@ -206,11 +206,16 @@ instance TypeCheck Expr where
         s2 <- unify (apply s1 (TFun t tv)) t1
         return (s2 `composeSubst` s1, TFun (apply s2 t) (apply s2 tv))
     ti env (Lit l) = ti env l
-    ti env (App e1 e2) = do
+    ti env e@(App e1 e2) = do
+        -- liftIO $ putStrLn $ show e
         tv <- tcmFresh
         (s1, t1) <- ti env e1
+        -- liftIO $ putStrLn $ " App (s1, t1) = " ++ show (s1, t1)
         (s2, t2) <- ti (apply s1 env) e2
+        -- liftIO $ putStrLn $ " App (s2, t2) = " ++ show (s2, t2)
         s3 <- unify (apply s2 t1) (TFun t2 tv)
+        -- liftIO $ putStrLn $ " App s3 = " ++ show s3
+        -- liftIO $ putStrLn $ " App ret = " ++ show (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
     ti env (Let x e1 e2) = do
         (s1, t1) <- ti env e1
@@ -305,6 +310,7 @@ caseCheckType env (PVar n, e) = do
 caseCheckType env (PConst k, e) = do
     (_, tk) <- ti env k
     (s, te) <- ti env e
+    -- liftIO $ putStrLn $ show (s, tk, te)
     return (s, tk, te)
 caseCheckType env (PTyped p t, e) = do
     (sp, tp) <- ti env p
@@ -312,21 +318,41 @@ caseCheckType env (PTyped p t, e) = do
     let s' = s `composeSubst` sp
     (se, te) <- ti (apply s' env) e
     return (se `composeSubst` s', apply se tp, apply se te)
-caseCheckType env (PCons p1 p2, e) = do
-    tv  <- tcmFresh
-    tv1 <- tcmFresh
+caseCheckType env (p@(PCons p1 p2), e) = do
+    -- liftIO $ putStrLn $ "checkType " ++ show p
     env' <- patEnv p1 env
+    -- liftIO $ putStrLn $ " env' = " ++ show env'
     (s1, t1) <- ti env' p1
-    s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
-    let s1'' = s1' `composeSubst` s1
-        t1'' = apply s1' tv1
+    -- liftIO $ putStrLn $ " (s1, t1) = " ++ show (s1, t1)
     env'' <- patEnv p2 env'
-    (s2, t2) <- ti (apply s1'' env'') p2
-    tv2 <- tcmFresh
-    s2' <- unify (apply s2 t1'') (TFun t2 tv2)
-    let sr = s2' `composeSubst` s2 `composeSubst` s1''
-    (se, te) <- ti (apply sr env'') e
-    return (se `composeSubst` sr, apply se tv2, apply se te)
+    -- liftIO $ putStrLn $ " env'' = " ++ show env''
+    (s2, t2) <- ti (apply s1 env'') p2
+    -- liftIO $ putStrLn $ " (s2, t2) = " ++ show (s2, t2)
+    let s = s2 `composeSubst` s1
+    -- liftIO $ putStrLn $ " s = " ++ show s
+    s3 <- unify (apply s (TList t1)) t2
+    -- liftIO $ putStrLn $ " s3 = " ++ show s3
+    let s' = s3 `composeSubst` s
+    -- liftIO $ putStrLn $ " s' = " ++ show s'
+    (se, te) <- ti (apply s' env'') e
+    -- liftIO $ putStrLn $ " (se, te) = " ++ show (se, te)
+    let s'' = se `composeSubst` s'
+    -- liftIO $ putStrLn $ " " ++ show (s'', apply s'' t2, apply s'' te)
+    return (se `composeSubst` s', apply s'' t2, apply s'' te)
+    -- tv  <- tcmFresh
+    -- tv1 <- tcmFresh
+    -- env' <- patEnv p1 env
+    -- (s1, t1) <- ti env' p1
+    -- s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
+    -- let s1'' = s1' `composeSubst` s1
+    --     t1'' = apply s1' tv1
+    -- env'' <- patEnv p2 env'
+    -- (s2, t2) <- ti (apply s1'' env'') p2
+    -- tv2 <- tcmFresh
+    -- s2' <- unify (apply s2 t1'') (TFun t2 tv2)
+    -- let sr = s2' `composeSubst` s2 `composeSubst` s1''
+    -- (se, te) <- ti (apply sr env'') e
+    -- return (se `composeSubst` sr, apply se tv2, apply se te)
 
 patEnv :: Pattern -> GammaEnv -> TCM GammaEnv
 patEnv (PVar n) env = do
@@ -335,8 +361,9 @@ patEnv (PVar n) env = do
     return $ GammaEnv $ env' `Map.union` (Map.singleton n (Scheme [] tv))
 patEnv (PConst _) env = return env
 patEnv (PCons p1 p2) env = do
-    te1 <- patEnv p1 env
-    throwError "PatEnv: Unimplemented"
+    (GammaEnv env1) <- patEnv p1 env
+    (GammaEnv env2) <- patEnv p2 env
+    return $ GammaEnv $ env2 `Map.union` env1
 patEnv (PTyped p t) env = throwError "PatEnv: Unimplemented"
 
 unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) 
@@ -378,21 +405,32 @@ typeInference env e = do
 
 -- todo: potrzebny mi TcState XD
 inferType :: Expr -> Either String Type
+-- inferType :: Expr -> IO (Either String Type)
 inferType e = do
     (res, _) <- runTCM (typeInference Map.empty e)
     return res
+    -- eit <- runTCM (typeInference Map.empty e)
+    -- either (return . Left) (\(res, _) -> return . pure $ res) eit
 
 inferTypeEnv :: SchemeMap -> Expr -> Either String Type
+-- inferTypeEnv :: SchemeMap -> Expr -> IO (Either String Type)
 inferTypeEnv sm e = do
     (res, _) <- runTCM (typeInference sm e)
     return res
+    -- eit <- runTCM (typeInference sm e)
+    -- either (return . Left) (\(res, _) -> return . pure $ res) eit
 
 checkType :: SchemeMap -> Expr -> Type -> Either String Type
+-- checkType :: SchemeMap -> Expr -> Type -> IO (Either String Type)
 checkType sm e t = do
     (res, _) <- runTCM $ do
         t' <- typeInference sm e
         unify t t' >> return t
     return res
+    -- eit <- runTCM $ do
+    --     t' <- typeInference sm e
+    --     unify t t' >> return t
+    -- either (return . Left) (\(res, _) -> return . pure $ res) eit 
 
 ----- SHOW INSTANCES -----
 instance Show Expr where
