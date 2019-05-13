@@ -122,7 +122,7 @@ instance Print LetDef where
 instance Print LetBind where
   prt i e = case e of
     ConstBind letlvi expr -> prPrec i 0 (concatD [prt 0 letlvi, doc (showString "="), prt 0 expr])
-    ProcBind procname letlvis rtype expr -> prPrec i 0 (concatD [prt 0 procname, prt 0 letlvis, prt 0 rtype, doc (showString "="), prt 0 expr])
+    ProcBind procname letlvis expr -> prPrec i 0 (concatD [prt 0 procname, prt 0 letlvis, doc (showString "="), prt 0 expr])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString "also"), prt 0 xs]
 
@@ -152,7 +152,6 @@ instance Print Pattern where
     PWildcard -> prPrec i 5 (concatD [doc (showString "_")])
     PListEmpty -> prPrec i 5 (concatD [doc (showString "[]")])
     PTypeAlg tident -> prPrec i 5 (concatD [prt 0 tident])
-    PTyped pattern type_ -> prPrec i 5 (concatD [doc (showString "("), prt 0 pattern, doc (showString ":"), prt 0 type_, doc (showString ")")])
     PList patterns -> prPrec i 4 (concatD [doc (showString "["), prt 4 patterns, doc (showString "]")])
     PTypeAlgRec tident pnested -> prPrec i 3 (concatD [doc (showString "("), prt 0 tident, prt 0 pnested, doc (showString ")")])
     PListCons pattern1 pattern2 -> prPrec i 1 (concatD [prt 5 pattern1, doc (showString "::"), prt 1 pattern2])
@@ -172,7 +171,6 @@ instance Print Expr where
     ETypeAlg tident -> prPrec i 9 (concatD [prt 0 tident])
     EList exprs -> prPrec i 9 (concatD [doc (showString "["), prt 0 exprs, doc (showString "]")])
     EApp expr1 expr2 -> prPrec i 8 (concatD [prt 8 expr1, prt 9 expr2])
-    ETyped expr type_ -> prPrec i 7 (concatD [doc (showString "("), prt 0 expr, doc (showString ":"), prt 0 type_, doc (showString ")")])
     ENeg expr -> prPrec i 6 (concatD [doc (showString "-"), prt 7 expr])
     ENot expr -> prPrec i 6 (concatD [doc (showString "not"), prt 7 expr])
     EMul expr1 expr2 -> prPrec i 5 (concatD [prt 5 expr1, doc (showString "*"), prt 6 expr2])
@@ -199,7 +197,6 @@ instance Print Expr where
 
 instance Print LambdaVI where
   prt i e = case e of
-    TypedVId vident type_ -> prPrec i 0 (concatD [doc (showString "("), prt 0 vident, doc (showString ":"), prt 0 type_, doc (showString ")")])
     LambdaVId vident -> prPrec i 0 (concatD [prt 0 vident])
     WildVId -> prPrec i 0 (concatD [doc (showString "_")])
   prtList _ [x] = concatD [prt 0 x]
@@ -253,9 +250,4 @@ instance Print Type where
     TFun type_1 type_2 -> prPrec i 0 (concatD [prt 1 type_1, doc (showString "->"), prt 0 type_2])
   prtList _ [] = concatD []
   prtList _ (x:xs) = concatD [prt 0 x, prt 0 xs]
-
-instance Print RType where
-  prt i e = case e of
-    NoRetType -> prPrec i 0 (concatD [])
-    RetType type_ -> prPrec i 0 (concatD [doc (showString "->"), prt 0 type_])
 

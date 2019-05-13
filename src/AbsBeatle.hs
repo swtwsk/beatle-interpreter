@@ -24,7 +24,7 @@ data LetDef = Let [LetBind] | LetRec [LetBind]
   deriving (Eq, Ord, Show, Read)
 
 data LetBind
-    = ConstBind LetLVI Expr | ProcBind ProcName [LetLVI] RType Expr
+    = ConstBind LetLVI Expr | ProcBind ProcName [LetLVI] Expr
   deriving (Eq, Ord, Show, Read)
 
 data LetLVI = LetLVI LambdaVI
@@ -41,7 +41,6 @@ data Pattern
     | PWildcard
     | PListEmpty
     | PTypeAlg TIdent
-    | PTyped Pattern Type
     | PList [Pattern]
     | PTypeAlgRec TIdent PNested
     | PListCons Pattern Pattern
@@ -56,7 +55,6 @@ data Expr
     | ETypeAlg TIdent
     | EList [Expr]
     | EApp Expr Expr
-    | ETyped Expr Type
     | ENeg Expr
     | ENot Expr
     | EMul Expr Expr
@@ -80,7 +78,7 @@ data Expr
     | ETypeCons TIdent [Expr]
   deriving (Eq, Ord, Show, Read)
 
-data LambdaVI = TypedVId VIdent Type | LambdaVId VIdent | WildVId
+data LambdaVI = LambdaVId VIdent | WildVId
   deriving (Eq, Ord, Show, Read)
 
 data Matching = MatchCase Pattern Expr
@@ -102,8 +100,5 @@ data Type
     | TAlgebraic TIdent
     | TPoly TPolyIdent
     | TFun Type Type
-  deriving (Eq, Ord, Show, Read)
-
-data RType = NoRetType | RetType Type
   deriving (Eq, Ord, Show, Read)
 

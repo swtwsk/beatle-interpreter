@@ -5,11 +5,11 @@ import Expr
 import qualified Data.Map as Map
 import Data.List (intercalate)
 
-data TypeDef = TypeDef { polynames :: [Name], consdef :: [(Name, [Type])] }
+data TypeDef = TypeDef { _polys :: [Type], _consdef :: [(Name, [Type])] }
 
 type ValMap = Map.Map Name Value
 type TypeName = String
-type ConsMap = Map.Map Name (Int, TypeName)
+type ConsMap = Map.Map Name TypeName
 type AlgTypeMap = Map.Map TypeName TypeDef
 
 data Env = Env 

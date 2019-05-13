@@ -30,8 +30,8 @@ data Expr = Var Name
           | Lam Pattern Expr
           | Lit Lit
           | App Expr Expr
-          | Let Name (Maybe Type) Expr Expr
-          | LetRec [(Name, Maybe Type, Expr)] Expr
+          | Let Name Expr Expr
+          | LetRec [(Name, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
@@ -43,7 +43,6 @@ data Expr = Var Name
 data Pattern = PConst Lit            -- constant
              | PVar Name             -- variable
              | PCons Pattern Pattern -- list
-             | PTyped Pattern Type
 
 data Lit = LInt Integer
          | LBool Bool
@@ -58,7 +57,7 @@ data Type = TInt
           | TFun Type Type
           | TVar String
           | TList Type
-          | TAlg String
+        --   | TAlg String [Type]
           deriving (Eq)
 
 class Arity a where
@@ -73,7 +72,6 @@ instance Arity Pattern where
     arity (PCons _ p2) = 1 + arity p2
     arity (PVar _) = 1
     arity (PConst _) = 1
-    arity (PTyped p _) = arity p
 
 ----- TYPE INFERENCE -----
 --  Heavily inspired by 'Algorithm W Step by Step' by Martin Grabmuller
@@ -91,11 +89,12 @@ instance Types Type where
     ftv (TFun t1 t2) = Set.union (ftv t1) (ftv t2)
     ftv (TVar n)     = Set.singleton n
     ftv (TList t)    = Set.empty
-    ftv (TAlg alg)   = Set.empty
+    -- ftv (TAlg alg t) = foldr (\t acc -> Set.union (ftv t) acc) Set.empty t
 
     apply s v@(TVar n)   = maybe v id $ Map.lookup n s
     apply s (TFun t1 t2) = TFun (apply s t1) (apply s t2)
     apply s (TList t)    = TList (apply s t)
+    -- apply s (TAlg alg t) = TAlg alg (map (apply s) t)
     apply s t            = t
 
 instance Types Scheme where
@@ -158,7 +157,16 @@ unify :: Type -> Type -> TCM Subst
 unify TInt TInt   = return emptySubst
 unify TBool TBool = return emptySubst
 unify (TList t1) (TList t2) = unify t1 t2
-unify (TAlg a) (TAlg b) = throwError "Type: Unify of algs unimplemented"
+-- unify (TAlg a at) (TAlg b bt) | a == b && length at == length bt = do
+--     let zt = zip at bt
+--     types <- foldM foldf [emptySubst] zt
+--     return (foldl1 composeSubst types)
+--     where
+--         foldf :: [Subst] -> (Type, Type) -> TCM [Subst]
+--         foldf s (t, t') = do
+--             let s1 = head s
+--             s2 <- unify (apply s1 t) (apply s1 t')
+--             return $ s2:s
 unify (TVar a) b = varBind a b
 unify a (TVar b) = varBind b a
 unify (TFun l r) (TFun l' r') = do
@@ -200,11 +208,6 @@ instance TypeCheck Expr where
         return (s1, TFun (apply s1 tv) t1)
     ti env (Lam (PConst k) e) = ti env k >> ti env e
     ti _ (Lam (PCons _ _) _) = throwError "Type: PCons unimplemented"
-    ti env (Lam (PTyped p t) e) = do
-        tv <- tcmFresh
-        (s1, t1) <- ti env (Lam p e)
-        s2 <- unify (apply s1 (TFun t tv)) t1
-        return (s2 `composeSubst` s1, TFun (apply s2 t) (apply s2 tv))
     ti env (Lit l) = ti env l
     ti env e@(App e1 e2) = do
         tv <- tcmFresh
@@ -212,8 +215,8 @@ instance TypeCheck Expr where
         (s2, t2) <- ti (apply s1 env) e2
         s3 <- unify (apply s2 t1) (TFun t2 tv)
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
-    ti env (Let x t e1 e2) = do
-        tv <- maybe tcmFresh return t
+    ti env (Let x e1 e2) = do
+        tv <- tcmFresh
         (s1, t1) <- ti env e1
         s1' <- unify t1 tv
         let s1'' = s1' `composeSubst` s1
@@ -224,7 +227,7 @@ instance TypeCheck Expr where
         return (s1'' `composeSubst` s2, t2)
     ti env (LetRec l e) = do
         (s1, t1, env') <- typeRec env l
-        let xs = map (\(n, _, _) -> n) l
+        let xs = map (\(n, _) -> n) l
             GammaEnv env2' = foldr (\x env -> remove env x) env' xs
             t' = generalize (apply s1 env) t1
             env2'' = GammaEnv $ foldr (\x env -> Map.insert x t' env) env2' xs
@@ -312,12 +315,6 @@ caseCheckType env (PConst k, e) = do
     (_, tk) <- ti env k
     (s, te) <- ti env e
     return (s, tk, te)
-caseCheckType env (PTyped p t, e) = do
-    (sp, tp) <- ti env p
-    s <- unify tp t
-    let s' = s `composeSubst` sp
-    (se, te) <- ti (apply s' env) e
-    return (se `composeSubst` s', apply se tp, apply se te)
 caseCheckType env (p@(PCons p1 p2), e) = do
     env' <- patEnv p1 Nothing env
     (s1, t1) <- ti env' p1
@@ -330,8 +327,7 @@ caseCheckType env (p@(PCons p1 p2), e) = do
     let s'' = se `composeSubst` s'
     return (se `composeSubst` s', apply s'' t2, apply s'' te)
 
-typeRec :: GammaEnv -> [(Name, Maybe Type, Expr)] 
-    -> TCM (Subst, Type, GammaEnv)
+typeRec :: GammaEnv -> [(Name, Expr)] -> TCM (Subst, Type, GammaEnv)
 typeRec env l = do
     tv <- tcmFresh
     let tfix = 
@@ -339,7 +335,7 @@ typeRec env l = do
         GammaEnv env' = remove env "fix"
         env'' = GammaEnv $ 
             env' `Map.union` (Map.singleton "fix" (Scheme [] tfix))
-        yfs = map (\(n, _, e) -> ("_y_" ++ n, transLambda l e)) l
+        yfs = map (\(n, e) -> ("_y_" ++ n, transLambda l e)) l
         ys  = 
             map (\(n, _) -> transYLambda yfs (App (Var "fix") (Var n))) yfs
     ss <- mapM (ti env'') ys
@@ -347,9 +343,9 @@ typeRec env l = do
     s1 <- foldM (unificator tv) s ss
     return (s1, apply s1 tv, env'')
     where
-        transLambda ((n,_,_):t) e = Lam (PVar n) $ transLambda t e
+        transLambda ((n,_):t) e = Lam (PVar n) $ transLambda t e
         transLambda [] e = e
-        transYLambda ((n,e):t) e' = Let n Nothing e (transYLambda t e')
+        transYLambda ((n,e):t) e' = Let n e (transYLambda t e')
         transYLambda [] e' = e'
         unificator tv s (_, t) = do
             unified <- unify (apply s tv) t
@@ -373,12 +369,6 @@ patEnv (PCons p1 p2) t env = do
     (GammaEnv env1) <- patEnv p1 tv env
     (GammaEnv env2) <- patEnv p2 t env
     return $ GammaEnv $ env2 `Map.union` env1
-patEnv (PTyped p t1) t env = do
-    case t of
-        Nothing -> patEnv p (Just t1) env
-        Just t2 -> do
-            s' <- unify t2 t1
-            patEnv p (Just (apply s' t1)) (apply s' env)
 
 unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) 
     -> TCM (Subst, Type, Type)
@@ -407,10 +397,6 @@ instance TypeCheck Pattern where
         tv2 <- tcmFresh
         s2' <- unify (apply s2 t1'') (TFun t2 tv2)
         return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
-    ti env (PTyped p t) = do
-        (s1, t1) <- ti env p
-        s2 <- unify (apply s1 t1) t
-        return (s2 `composeSubst` s1, apply s2 t)
 
 typeInference :: Map.Map String Scheme -> Expr -> TCM Type
 typeInference env e = do
@@ -422,7 +408,7 @@ inferType sm e = do
     (res, _) <- runTCM (typeInference sm e)
     return res
 
-inferTypeRec :: SchemeMap -> [(Name, Maybe Type, Expr)] -> Either String Type
+inferTypeRec :: SchemeMap -> [(Name, Expr)] -> Either String Type
 inferTypeRec sm l = do
     ((_, res, _), _) <- runTCM (typeRec (GammaEnv sm) l)
     return res
@@ -441,10 +427,10 @@ instance Show Expr where
     show (Lam n e) = "λ" ++ show n ++ " -> " ++ show e
     show (Lit l) = show l
     show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
-    show (Let n _ e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
+    show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
     show (LetRec l e) = 
         "letrec " ++ 
-        intercalate " also " (map (\(n, _, e') -> show n ++ " = " 
+        intercalate " also " (map (\(n, e') -> show n ++ " = " 
         ++ show e') l) ++ " in " ++ show e
     show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
         " else " ++ show e2
@@ -512,4 +498,4 @@ instance Show Type where
         TFun t1 t2 -> "(" ++ show t1 ++ ") -> " ++ show t2
         TVar s -> s
         TList t -> "[" ++ show t ++ "]"
-        TAlg s -> s
+        -- TAlg s ts -> s ++ " " ++ intercalate " " (map show ts)

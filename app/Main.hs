@@ -43,7 +43,7 @@ process :: String -> IState ()
 process line = do
     let res = pLine (myLLexer line)
     case res of
-        (Bad s) -> unless (null line) $ liftIO $ putStrLn $ "err: " ++ s
+        (Bad s) -> unless (null line) $ liftIO $ putStrLn s
         (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
         
 run :: IO ()

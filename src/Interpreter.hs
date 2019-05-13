@@ -25,8 +25,7 @@ type Result = TransRes InterRes
 
 type IState = StateT Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(Name, Maybe E.Type, E.Expr)] 
-         | Rec [(Name, Maybe E.Type, E.Expr)]
+data Fun = Fun [(Name, E.Expr)] | Rec [(Name, E.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -61,19 +60,17 @@ interpretPhrase (Value letdef) = do
     extr <- return $ map (\(n, v, t) -> (pure n, v, t)) ms
     return . pure . InterVal $ extr
     where
-        ev env (name, t, expr) = (name, case t of
-            Just t' -> evalCheck env expr t'
-            Nothing -> eval env expr)
+        ev env (name, expr) = (name, eval env expr)
         extractVar (n, (v, t)) = pure (n, v, t)
 interpretPhrase (TypeDecl typedef) = do
     env <- get
     ttd <- either throwError return $ translateTypeDef typedef
     let (tname, tdef) = ttd
     let tmap = Map.insert tname tdef $ _algtypes env
-    let cons = map (\(n, t) -> (n, (length t, tname))) $ V.consdef tdef
+    let cons = map (\(n, _) -> (n, tname)) $ V._consdef tdef
     let cmap = Map.union (Map.fromList cons) (_constructors env)
     put $ env { _constructors = cmap, _algtypes = tmap }
-    return . pure $ InterType tname (V.consdef tdef)
+    return . pure $ InterType tname (V._consdef tdef)
 
 translateExpr :: Expr -> TransRes E.Expr
 translateExpr (EId (VIdent n)) = pure $ E.Var n
@@ -85,10 +82,6 @@ translateExpr (EApp e1 e2) = do
     te1 <- translateExpr e1
     te2 <- translateExpr e2
     pure $ E.App te1 te2
-translateExpr (ETyped e t) = do
-    te <- translateExpr e
-    let tt = translateType t
-    pure $ E.Typed te tt
 translateExpr (ENeg e) = do
     te <- translateExpr e
     pure $ E.UnOp E.OpNeg te
@@ -163,7 +156,7 @@ translateExpr (ELetIn letdef e) = do
         Rec list -> pure $ E.LetRec list te
     where
         transLambda l e = case l of
-            (n, t', fe):t -> E.Let n t' fe (transLambda t e)
+            (n, fe):t -> E.Let n fe (transLambda t e)
             [] -> e
 
 translateExpr (EMatch (VIdent n) matchList) = do
@@ -175,10 +168,8 @@ translateExpr (ELambda vlist e) = do
     pure $ transLambda vlist te
     where 
         transLambda l e = case l of
-            h:t -> extract (translateLambdaVI h) (transLambda t e)
+            h:t -> E.Lam (E.PVar $ translateLambdaVI h) (transLambda t e)
             [] -> e
-        extract (n, Just t) l = E.Lam (E.PTyped (E.PVar n) t) l
-        extract (n, _) l = E.Lam (E.PVar n) l
 translateExpr (EList elist) = do
     tlist <- sequence $ map translateExpr elist
     pure . trans $ tlist
@@ -198,70 +189,29 @@ translateLetDef ld = case ld of
     LetRec letbinds -> 
         either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (Name, Maybe E.Type, E.Expr)
+translateLetBind :: LetBind -> TransRes (Name, E.Expr)
 translateLetBind (ConstBind lvi e) = do
-    tlvi <- translateLetLVI lvi
-    let (n, t) = tlvi
+    n <- translateLetLVI lvi
     te <- translateExpr e
-    pure (n, t, te)
-translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
+    pure (n, te)
+translateLetBind (ProcBind (ProcNameId (VIdent proc)) il e) = do
     til <- sequence $ map translateLetLVI il
     te <- translateExpr e
-    let trt = translateRetType rt
-        (_, untyped) = giveTypeNames $ (map (\(_, t) -> t) til) ++ [trt]
-        (params, ret) = splitLast untyped
-        proctype = foldr (\t acc -> E.TFun t acc) ret params
-    pure (proc, pure proctype, transLambda til te)
+    pure (proc, transLambda til te)
     where
         transLambda l e = case l of
-            (n, Just typ):t  -> 
-                E.Lam (E.PTyped (E.PVar n) typ) (transLambda t e)
-            (n, _):t  -> E.Lam (E.PVar n) (transLambda t e)
+            n:t  -> E.Lam (E.PVar n) (transLambda t e)
             [] -> e
-        splitLast :: [a] -> ([a], a)
-        splitLast l = case l of
-            h:[] -> ([], h)
-            h:t -> let (init, last) = splitLast t in (h:init, last)
-        -- we may do splitLast because procedure has at least one argument
 
-data TypeState = TypeState { _supply :: String, _vars :: [String] }
-type TypeNameState = StateT TypeState Identity E.Type
-
-emptyTypeState :: TypeState
-emptyTypeState = TypeState { _supply = "\'a",
-                             _vars   = ["\'a"] }
-
-freshName :: TypeNameState
-freshName = do
-    s <- get
-    let c@(h:t) = _supply s
-        next    = if h == 'z' then "\'a" ++ c else '\'':(succ h):t
-    put s { _supply = next, _vars = next:(_vars s) }
-    return $ E.TVar c
-
-giveTypeNames :: [Maybe E.Type] -> ([String], [E.Type])
-giveTypeNames l = 
-    let (res, st) = runState (mapM giveTypeNames' l) emptyTypeState in
-        ((_vars st), res)
-    where
-        giveTypeNames' :: Maybe E.Type -> TypeNameState
-        giveTypeNames' (Just t)  = return t
-        giveTypeNames' Nothing = freshName
-
-translateLetLVI :: LetLVI -> TransRes (Name, Maybe E.Type)
+translateLetLVI :: LetLVI -> TransRes Name
 translateLetLVI (LetLVI lvi) = pure $ translateLambdaVI lvi
 
-translateLambdaVI :: LambdaVI -> (Name, Maybe E.Type)
-translateLambdaVI (TypedVId (VIdent n) typ) = (n, pure $ translateType typ)
-translateLambdaVI (LambdaVId (VIdent n)) = (n, Nothing)
-translateLambdaVI (WildVId) = ("_", Nothing)
+translateLambdaVI :: LambdaVI -> Name
+translateLambdaVI (LambdaVId (VIdent n)) = n
+translateLambdaVI (WildVId) = "_"
 
 translatePattern :: Pattern -> TransRes E.Pattern
 translatePattern (PId (VIdent n)) = pure $ E.PVar n
-translatePattern (PTyped p t) = do
-    tp <- translatePattern p
-    let tt = translateType t
-    pure $ E.PTyped tp tt
 translatePattern (PInt i) = pure . E.PConst $ LInt i
 translatePattern PTrue = pure . E.PConst $ LBool True
 translatePattern PFalse = pure . E.PConst $ LBool False
@@ -290,9 +240,16 @@ translateMatching (MatchCase p expr) = do
 
 translateTypeDef :: TypeDef -> TransRes (Name, V.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
-    let mpolys = map (\(TPolyIdent s) -> s) polys
+    let mpolys = map (\(TPolyIdent s) ->  E.TVar s) polys
     tl <- sequence $ map translateTypeCons ltcons
-    return $ (t, V.TypeDef { V.polynames = mpolys, V.consdef = tl })
+    let check = foldl (&&) True $ map (checkType mpolys) $ flattenTypes tl
+    if not check then Left "Unbound type parameters" else return $ 
+        (t, V.TypeDef { V._polys = mpolys, V._consdef = tl })
+    where
+        flattenTypes ((_, ts):t) = ts ++ (flattenTypes t)
+        flattenTypes [] = []
+        checkType pols t@(E.TVar _) = any ((==) t) pols
+        checkType _ _ = True
 
 translateTypeCons :: TypeCons -> TransRes (Name, [E.Type])
 translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
@@ -301,10 +258,6 @@ translateType :: Type -> E.Type
 translateType TInt = E.TInt
 translateType TBool = E.TBool
 translateType (TList t) = E.TList $ translateType t
-translateType (TAlgebraic (TIdent t)) = E.TAlg t
+-- translateType (TAlgebraic (TIdent t)) = E.TAlg t
 translateType (TPoly (TPolyIdent t)) = E.TVar t
 translateType (TFun t1 t2) = E.TFun (translateType t1) (translateType t2)
-
-translateRetType :: RType -> Maybe E.Type
-translateRetType NoRetType = Nothing
-translateRetType (RetType t) = pure $ translateType t

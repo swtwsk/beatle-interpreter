@@ -17,7 +17,7 @@ terminator Phrase ";;" ;
 Let.        LetDef   ::= "let" [LetBind] ;
 LetRec.     LetDef   ::= "letrec" [LetBind] ;
 ConstBind.  LetBind  ::= LetLVI "=" Expr ;
-ProcBind.   LetBind  ::= ProcName [LetLVI] RType "=" Expr ;
+ProcBind.   LetBind  ::= ProcName [LetLVI] "=" Expr ;
 LetLVI.     LetLVI   ::= LambdaVI ;
 separator nonempty LetLVI "" ;
 separator nonempty LetBind "also" ;
@@ -29,7 +29,6 @@ PFalse.     Pattern5 ::= "False" ;
 PWildcard.  Pattern5 ::= "_" ;
 PListEmpty. Pattern5 ::= "[]" ;
 PTypeAlg.   Pattern5 ::= TIdent ;
-PTyped.     Pattern5 ::= "(" Pattern ":" Type ")" ;
 PList.      Pattern4 ::= "[" [Pattern4] "]" ;
 PTypeAlgRec.Pattern3 ::= "(" TIdent PNested ")";
 PListCons.  Pattern1 ::= Pattern5 "::" Pattern1 ;
@@ -51,7 +50,6 @@ ETypeAlg.   Expr9    ::= TIdent ;
 EList.      Expr9    ::= "[" [Expr] "]" ;
 
 EApp.       Expr8    ::= Expr8 Expr9 ;
-ETyped.     Expr7    ::= "(" Expr ":" Type ")" ;
 
 ENeg.       Expr6    ::= "-" Expr7 ;
 ENot.       Expr6    ::= "not" Expr7 ;
@@ -79,7 +77,6 @@ ELambda.    Expr     ::= "\\" [LambdaVI] "->" Expr ;
 
 ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
 
-TypedVId.   LambdaVI ::= "(" VIdent ":" Type ")" ;
 LambdaVId.  LambdaVI ::= VIdent ;
 WildVId.    LambdaVI ::= "_" ;
 
@@ -105,6 +102,3 @@ TAlgebraic. Type1    ::= TIdent ;
 TPoly.      Type1    ::= TPolyIdent ;
 TFun.       Type     ::= Type1 "->" Type ;
 coercions Type 1 ;
-
-NoRetType.  RType    ::= ;
-RetType.    RType    ::= "->" Type ;
