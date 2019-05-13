@@ -70,9 +70,10 @@ instance Arity Expr where
     arity _ = 0
 
 instance Arity Pattern where
-    arity (PCons _ (PConst LNil)) = 1
     arity (PCons _ p2) = 1 + arity p2
-    arity _ = 0
+    arity (PVar _) = 1
+    arity (PConst _) = 1
+    arity (PTyped p _) = arity p
 
 ----- TYPE INFERENCE -----
 --  Heavily inspired by 'Algorithm W Step by Step' by Martin Grabmuller

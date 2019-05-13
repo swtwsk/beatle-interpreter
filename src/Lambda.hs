@@ -182,7 +182,7 @@ apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
     let arityp = arity p
         aritye = arity e2
     _ <- if arityp > aritye then (Left MatchFail) else return ()
-    e1' <- unpackp p (arityp - 1)
+    e1' <- unpackp p arityp
     let e2'  = unpackv e2 arityp
         venv = Map.fromList $ zip e1' e2'
         nenv = (mergeEnv cenv env) {
@@ -191,12 +191,14 @@ apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
     either (Left . ApplyFail) return $ runExcept $ runReaderT (eval' e1) nenv
     where
         unpackp :: Pattern -> Int -> Either ApplyErr [Name]
-        unpackp (PCons (PVar p1) p2) len = if len <= 0 then return [p1]
+        unpackp (PCons (PVar p1) p2) len = if len <= 1 then return [p1]
             else do { p2' <- unpackp p2 (len - 1); return $ p1 : p2'}
-        unpackp (PCons {}) _ = Left . ApplyFail $ 
+        unpackp (PVar p1) _ = return [p1]
+        unpackp _ _ = Left . ApplyFail $ 
             "List patterns that aren't variables are forbidden"
-        unpackv (VCons e1 e2) len = 
-            if len > 0 then e1 : (unpackv e2 $ len - 1) else e1 : [e2]
+        unpackv v@(VCons v1 v2) len = 
+            if len > 1 then v1 : (unpackv v2 $ len - 1) else [v]
+        unpackv (VNil) _ = [VNil]
         
 apply (VClos (PTyped p _) e1 cenv) e2 env = 
     apply (VClos p e1 cenv) e2 env
