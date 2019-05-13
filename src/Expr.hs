@@ -207,15 +207,10 @@ instance TypeCheck Expr where
         return (s2 `composeSubst` s1, TFun (apply s2 t) (apply s2 tv))
     ti env (Lit l) = ti env l
     ti env e@(App e1 e2) = do
-        -- liftIO $ putStrLn $ show e
         tv <- tcmFresh
         (s1, t1) <- ti env e1
-        -- liftIO $ putStrLn $ " App (s1, t1) = " ++ show (s1, t1)
         (s2, t2) <- ti (apply s1 env) e2
-        -- liftIO $ putStrLn $ " App (s2, t2) = " ++ show (s2, t2)
         s3 <- unify (apply s2 t1) (TFun t2 tv)
-        -- liftIO $ putStrLn $ " App s3 = " ++ show s3
-        -- liftIO $ putStrLn $ " App ret = " ++ show (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
     ti env (Let x e1 e2) = do
         (s1, t1) <- ti env e1
@@ -285,9 +280,6 @@ instance TypeCheck Expr where
         s2' <- unify (apply s2 t1'') (TFun t2 tv2)
         return (s2' `composeSubst` s2 `composeSubst` s1'', apply s2' tv2)
     ti env (AlgCons n le) = throwError "Type: AlgCons unimplemented yet"
-    -- lp :: [(Pattern, Type, Expr)]
-    ti env (Case n []) = 
-        throwError "Type: Unexpected error - empty pattern match"
     ti env (Case n l) = do
         (sn, tn)       <- ti env (Var n)
         tl <- mapM (caseCheckType (apply sn env)) l
@@ -310,7 +302,6 @@ caseCheckType env (PVar n, e) = do
 caseCheckType env (PConst k, e) = do
     (_, tk) <- ti env k
     (s, te) <- ti env e
-    -- liftIO $ putStrLn $ show (s, tk, te)
     return (s, tk, te)
 caseCheckType env (PTyped p t, e) = do
     (sp, tp) <- ti env p
@@ -319,52 +310,41 @@ caseCheckType env (PTyped p t, e) = do
     (se, te) <- ti (apply s' env) e
     return (se `composeSubst` s', apply se tp, apply se te)
 caseCheckType env (p@(PCons p1 p2), e) = do
-    -- liftIO $ putStrLn $ "checkType " ++ show p
-    env' <- patEnv p1 env
-    -- liftIO $ putStrLn $ " env' = " ++ show env'
+    env' <- patEnv p1 Nothing env
     (s1, t1) <- ti env' p1
-    -- liftIO $ putStrLn $ " (s1, t1) = " ++ show (s1, t1)
-    env'' <- patEnv p2 env'
-    -- liftIO $ putStrLn $ " env'' = " ++ show env''
+    env'' <- patEnv p2 Nothing env'
     (s2, t2) <- ti (apply s1 env'') p2
-    -- liftIO $ putStrLn $ " (s2, t2) = " ++ show (s2, t2)
     let s = s2 `composeSubst` s1
-    -- liftIO $ putStrLn $ " s = " ++ show s
     s3 <- unify (apply s (TList t1)) t2
-    -- liftIO $ putStrLn $ " s3 = " ++ show s3
     let s' = s3 `composeSubst` s
-    -- liftIO $ putStrLn $ " s' = " ++ show s'
     (se, te) <- ti (apply s' env'') e
-    -- liftIO $ putStrLn $ " (se, te) = " ++ show (se, te)
     let s'' = se `composeSubst` s'
-    -- liftIO $ putStrLn $ " " ++ show (s'', apply s'' t2, apply s'' te)
     return (se `composeSubst` s', apply s'' t2, apply s'' te)
-    -- tv  <- tcmFresh
-    -- tv1 <- tcmFresh
-    -- env' <- patEnv p1 env
-    -- (s1, t1) <- ti env' p1
-    -- s1' <- unify (TFun tv (TFun (TList tv) (TList tv))) (TFun t1 tv1)
-    -- let s1'' = s1' `composeSubst` s1
-    --     t1'' = apply s1' tv1
-    -- env'' <- patEnv p2 env'
-    -- (s2, t2) <- ti (apply s1'' env'') p2
-    -- tv2 <- tcmFresh
-    -- s2' <- unify (apply s2 t1'') (TFun t2 tv2)
-    -- let sr = s2' `composeSubst` s2 `composeSubst` s1''
-    -- (se, te) <- ti (apply sr env'') e
-    -- return (se `composeSubst` sr, apply se tv2, apply se te)
 
-patEnv :: Pattern -> GammaEnv -> TCM GammaEnv
-patEnv (PVar n) env = do
-    tv <- tcmFresh
+patEnv :: Pattern -> Maybe Type -> GammaEnv -> TCM GammaEnv
+patEnv (PVar n) t env = do
+    tv <- maybe tcmFresh return t
     let GammaEnv env' = remove env n
     return $ GammaEnv $ env' `Map.union` (Map.singleton n (Scheme [] tv))
-patEnv (PConst _) env = return env
-patEnv (PCons p1 p2) env = do
-    (GammaEnv env1) <- patEnv p1 env
-    (GammaEnv env2) <- patEnv p2 env
+patEnv (PConst k) t env = do
+    tv <- maybe tcmFresh return t
+    (sk, tk) <- ti env (PConst k)
+    t' <- unify (apply sk tv) tk
+    return env
+patEnv (PCons p1 p2) t env = do
+    tv <- case t of
+        Nothing -> return Nothing
+        Just (TList t') -> return $ Just t'
+        Just _ -> throwError "Type: Pattern was expected to be of list type"
+    (GammaEnv env1) <- patEnv p1 tv env
+    (GammaEnv env2) <- patEnv p2 t env
     return $ GammaEnv $ env2 `Map.union` env1
-patEnv (PTyped p t) env = throwError "PatEnv: Unimplemented"
+patEnv (PTyped p t1) t env = do
+    case t of
+        Nothing -> patEnv p (Just t1) env
+        Just t2 -> do
+            s' <- unify t2 t1
+            patEnv p (Just (apply s' t1)) (apply s' env)
 
 unifyTypes :: (Subst, Type, Type) -> (Subst, Type, Type) 
     -> TCM (Subst, Type, Type)
