@@ -25,7 +25,8 @@ type Result = TransRes InterRes
 
 type IState = StateT Env (ExceptT String (InputT IO))
 
-data Fun = Fun [(Name, E.SchemeMap, E.Expr)] | Rec [(Name, E.SchemeMap, E.Expr)]
+data Fun = Fun [(Name, Maybe E.Type, E.Expr)] 
+         | Rec [(Name, Maybe E.Type, E.Expr)]
 
 interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
@@ -43,36 +44,26 @@ interpretPhrase (Value letdef) = do
     let vmap = _values env
     tld <- either throwError return $ translateLetDef letdef
     m <- case tld of
-        Fun list -> do
-            let tmap   = map (\(_, s, _) -> s) list
-                tmap'  = foldr Map.union Map.empty tmap
-                tmap'' = Map.union tmap'' (_schemes env)
-                tenv   = env { _schemes = tmap'' }
-            _ <- either throwError return $ 
-                mapM (\(_, t, e') -> typeCheck env e') list
-            either throwError return $ seqPair $ map (ev env) list
-        Rec list -> throwError "Rec unimplemented"
-            -- do
-            -- tlist <- mapM (either throwError return . extractVar) list
-            -- let tmap  = Map.fromList tlist
-            --     tmap' = Map.union tmap (_schemes env)
-            --     env'  = env { _schemes = tmap' }
-            -- _ <- either throwError return $ 
-            --     mapM (\(_, _, e') -> typeCheck env' e') list
-            -- return $ fixed env list
-            -- where
-            --     extractVar (n, t, _) = pure (n, t)
+        Fun list -> either throwError return $ seqPair $ map (ev env) list
+        Rec list -> do
+            let sch = _schemes env
+            ty <- either throwError return $ E.inferTypeRec sch list
+            return $ zipType (fixed env list) ty
+            where
+                zipType ((n, v):tv) t = (n, (v, t)):(zipType tv t)
+                zipType [] _ = []
     ms <- mapM (either throwError return . extractVar) m
     let m' = map (\(n, v, _) -> (n, v)) ms
     let t' = map (\(n, _, t) -> 
             (n, E.generalize (E.GammaEnv $ _schemes env) t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
-    extr <- return $ map extract m
+    extr <- return $ map snd m
     return . pure . InterVal $ extr
     where
-        ev env (name, _, expr) = (name, eval env expr)
-        extract (_, expr) = expr
+        ev env (name, t, expr) = (name, case t of
+            Just t' -> evalCheck env expr t'
+            Nothing -> eval env expr)
         extractVar (n, (v, t)) = pure (n, v, t)
 interpretPhrase (TypeDecl typedef) = do
     env <- get
@@ -169,10 +160,10 @@ translateExpr (ELetIn letdef e) = do
     te <- translateExpr e
     case tl of 
         Fun list -> pure $ transLambda list te
-        Rec list -> pure $ E.LetRec (map (\(n, sch, e) -> (n, e)) list) te
+        Rec list -> pure $ E.LetRec list te
     where
         transLambda l e = case l of
-            (n, _, fe):t -> E.Let n fe (transLambda t e)
+            (n, t', fe):t -> E.Let n t' fe (transLambda t e)
             [] -> e
 
 translateExpr (EMatch (VIdent n) matchList) = do
@@ -207,23 +198,20 @@ translateLetDef ld = case ld of
     LetRec letbinds -> 
         either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (Name, E.SchemeMap, E.Expr)
+translateLetBind :: LetBind -> TransRes (Name, Maybe E.Type, E.Expr)
 translateLetBind (ConstBind lvi e) = do
     tlvi <- translateLetLVI lvi
     let (n, t) = tlvi
-    let nt = E.TVar "a"
-        t' = Map.singleton n $ E.Scheme [] $ maybe nt id t
     te <- translateExpr e
-    pure (n, t', te)
+    pure (n, t, te)
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) il rt e) = do
     til <- sequence $ map translateLetLVI il
     te <- translateExpr e
     let trt = translateRetType rt
-        (vars, untyped) = giveTypeNames $ (map (\(_, t) -> t) til) ++ [trt]
+        (_, untyped) = giveTypeNames $ (map (\(_, t) -> t) til) ++ [trt]
         (params, ret) = splitLast untyped
         proctype = foldr (\t acc -> E.TFun t acc) ret params
-        scheme = E.Scheme [] proctype
-    pure (proc, Map.singleton proc scheme, transLambda til te)
+    pure (proc, pure proctype, transLambda til te)
     where
         transLambda l e = case l of
             (n, Just typ):t  -> 

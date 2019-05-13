@@ -9,8 +9,8 @@ module Lambda (
     AlgTypeMap,
     Env(..),
     eval,
+    evalCheck,
     typeCheck,
-    typeEqualCheck,
     fixed,
     emptyEnv
 ) where
@@ -29,28 +29,30 @@ import Values
 type TypeReader = ReaderT Env (Except String) Type
 type EvalReader = ReaderT Env (Except String) Value
 
-fixed :: Env -> [(Name, Expr)] -> [(Name, Value)]
-fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
+fixed :: Env -> [(Name, Maybe Type, Expr)] -> [(Name, Value)]
+fixed env l = map (\(n, _, _) -> (n, VFixed n l' env)) l
+    where l' = map (\(n, _, e) -> (n, e)) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
     -- typed <- typeCheck env expr
     let schemes = _schemes env
-    typed <- inferTypeEnv schemes expr
+    typed <- inferType schemes expr
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
-typeCheck :: Env -> Expr -> Either String Type
-typeCheck env expr = do
+evalCheck :: Env -> Expr -> Type -> Either String (Value, Type)
+evalCheck env expr t = do
     let schemes = _schemes env
-    -- runExcept $ runReaderT (inferTypeEnv schemes expr) env
-    either throwError return $ inferTypeEnv schemes expr
+    typed <- checkType schemes expr t
+    evaled <- runExcept $ runReaderT (eval' expr) env
+    return (evaled, typed)
 
-typeEqualCheck :: Env -> Expr -> Type -> Either String Type
-typeEqualCheck env expr t = do
+typeCheck :: Env -> Expr -> Maybe Type -> Either String Type
+typeCheck env expr t = do
+    let tv = maybe (TVar "a") id t
     let schemes = _schemes env
-    either throwError return $ checkType schemes expr t
-    -- runExcept $ runReaderT (checkType expr t) env
+    either throwError return $ checkType schemes expr tv
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -72,7 +74,7 @@ eval' (Case var l) = do
     val <- eval' (Var var)
     either readApplyErr return $ apply (VCase var l env) val env
 
-eval' (Let n e1 e2) = do
+eval' (Let n _ e1 e2) = do
     env <- ask
     let vmap = _values env
     eval1 <- either fail return $ eval env e1

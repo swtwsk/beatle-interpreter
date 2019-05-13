@@ -11,7 +11,7 @@ module Expr(
     GammaEnv(..),
     Arity(..),
     inferType,
-    inferTypeEnv,
+    inferTypeRec,
     checkType,
     generalize
 ) where
@@ -30,8 +30,8 @@ data Expr = Var Name
           | Lam Pattern Expr
           | Lit Lit
           | App Expr Expr
-          | Let Name Expr Expr
-          | LetRec [(Name, Expr)] Expr
+          | Let Name (Maybe Type) Expr Expr
+          | LetRec [(Name, Maybe Type, Expr)] Expr
           | If Expr Expr Expr
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
@@ -212,43 +212,24 @@ instance TypeCheck Expr where
         (s2, t2) <- ti (apply s1 env) e2
         s3 <- unify (apply s2 t1) (TFun t2 tv)
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
-    ti env (Let x e1 e2) = do
+    ti env (Let x t e1 e2) = do
+        tv <- maybe tcmFresh return t
         (s1, t1) <- ti env e1
+        s1' <- unify t1 tv
+        let s1'' = s1' `composeSubst` s1
         let GammaEnv env' = remove env x
-            t' = generalize (apply s1 env) t1
+            t' = generalize (apply s1'' env) t1
             env'' = GammaEnv (Map.insert x t' env')
-        (s2, t2) <- ti (apply s1 env'') e2
-        return (s1 `composeSubst` s2, t2)
+        (s2, t2) <- ti (apply s1'' env'') e2
+        return (s1'' `composeSubst` s2, t2)
     ti env (LetRec l e) = do
-        tv <- tcmFresh
-        let tfix = 
-                TFun (foldr (\_ acc -> TFun tv acc) (TFun tv tv) (tail l)) tv
-            GammaEnv env' = remove env "fix"
-            env'' = GammaEnv $ 
-                env' `Map.union` (Map.singleton "fix" (Scheme [] tfix))
-            yfs = map (\(n, e) -> ("_y_" ++ n, transLambda l e)) l
-            ys  = 
-                map (\(n, _) -> transYLambda yfs (App (Var "fix") (Var n))) yfs
-        ss <- mapM (ti env'') ys
-        let s = foldr (\(s, _) acc -> s `composeSubst` acc) Map.empty ss
-        s1 <- foldM (unificator tv) s ss
-        -- return (s, t1)
-        let t1 = apply s1 tv
-            xs = map fst l
-            GammaEnv env2' = foldr (\x env -> remove env x) env'' xs
+        (s1, t1, env') <- typeRec env l
+        let xs = map (\(n, _, _) -> n) l
+            GammaEnv env2' = foldr (\x env -> remove env x) env' xs
             t' = generalize (apply s1 env) t1
             env2'' = GammaEnv $ foldr (\x env -> Map.insert x t' env) env2' xs
         (s2, t2) <- ti (apply s1 env2'') e
         return (s1 `composeSubst` s2, t2)
-        where
-            transLambda ((n,_):t) e = Lam (PVar n) $ transLambda t e
-            transLambda [] e = e
-            transYLambda ((n,e):t) e' = Let n e (transYLambda t e')
-            transYLambda [] e' = e'
-            unificator tv s (_, t) = do
-                unified <- unify (apply s tv) t
-                return $ unified `composeSubst` s
-
     ti env (If c e1 e2) = do
         tv1 <- tcmFresh
         tc' <- tcmFresh
@@ -349,6 +330,31 @@ caseCheckType env (p@(PCons p1 p2), e) = do
     let s'' = se `composeSubst` s'
     return (se `composeSubst` s', apply s'' t2, apply s'' te)
 
+typeRec :: GammaEnv -> [(Name, Maybe Type, Expr)] 
+    -> TCM (Subst, Type, GammaEnv)
+typeRec env l = do
+    tv <- tcmFresh
+    let tfix = 
+            TFun (foldr (\_ acc -> TFun tv acc) (TFun tv tv) (tail l)) tv
+        GammaEnv env' = remove env "fix"
+        env'' = GammaEnv $ 
+            env' `Map.union` (Map.singleton "fix" (Scheme [] tfix))
+        yfs = map (\(n, _, e) -> ("_y_" ++ n, transLambda l e)) l
+        ys  = 
+            map (\(n, _) -> transYLambda yfs (App (Var "fix") (Var n))) yfs
+    ss <- mapM (ti env'') ys
+    let s = foldr (\(s, _) acc -> s `composeSubst` acc) Map.empty ss
+    s1 <- foldM (unificator tv) s ss
+    return (s1, apply s1 tv, env'')
+    where
+        transLambda ((n,_,_):t) e = Lam (PVar n) $ transLambda t e
+        transLambda [] e = e
+        transYLambda ((n,e):t) e' = Let n Nothing e (transYLambda t e')
+        transYLambda [] e' = e'
+        unificator tv s (_, t) = do
+            unified <- unify (apply s tv) t
+            return $ unified `composeSubst` s
+
 patEnv :: Pattern -> Maybe Type -> GammaEnv -> TCM GammaEnv
 patEnv (PVar n) t env = do
     tv <- maybe tcmFresh return t
@@ -411,34 +417,23 @@ typeInference env e = do
     (s, t) <- ti (GammaEnv env) e
     return (apply s t)
 
--- todo: potrzebny mi TcState XD
-inferType :: Expr -> Either String Type
--- inferType :: Expr -> IO (Either String Type)
-inferType e = do
-    (res, _) <- runTCM (typeInference Map.empty e)
-    return res
-    -- eit <- runTCM (typeInference Map.empty e)
-    -- either (return . Left) (\(res, _) -> return . pure $ res) eit
-
-inferTypeEnv :: SchemeMap -> Expr -> Either String Type
--- inferTypeEnv :: SchemeMap -> Expr -> IO (Either String Type)
-inferTypeEnv sm e = do
+inferType :: SchemeMap -> Expr -> Either String Type
+inferType sm e = do
     (res, _) <- runTCM (typeInference sm e)
     return res
-    -- eit <- runTCM (typeInference sm e)
-    -- either (return . Left) (\(res, _) -> return . pure $ res) eit
+
+inferTypeRec :: SchemeMap -> [(Name, Maybe Type, Expr)] -> Either String Type
+inferTypeRec sm l = do
+    ((_, res, _), _) <- runTCM (typeRec (GammaEnv sm) l)
+    return res
 
 checkType :: SchemeMap -> Expr -> Type -> Either String Type
--- checkType :: SchemeMap -> Expr -> Type -> IO (Either String Type)
 checkType sm e t = do
     (res, _) <- runTCM $ do
-        t' <- typeInference sm e
-        unify t t' >> return t
+        (s1, t1) <- ti (GammaEnv sm) e
+        s <- unify t t1
+        return (apply (s1 `composeSubst` s) t1)
     return res
-    -- eit <- runTCM $ do
-    --     t' <- typeInference sm e
-    --     unify t t' >> return t
-    -- either (return . Left) (\(res, _) -> return . pure $ res) eit 
 
 ----- SHOW INSTANCES -----
 instance Show Expr where
@@ -446,10 +441,10 @@ instance Show Expr where
     show (Lam n e) = "λ" ++ show n ++ " -> " ++ show e
     show (Lit l) = show l
     show (App e1 e2) = "(" ++ show e1 ++ ")(" ++ show e2 ++ ")"
-    show (Let n e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
+    show (Let n _ e1 e2) = "let " ++ show n ++ " = " ++ show e1 ++ " in " ++ show e2
     show (LetRec l e) = 
         "letrec " ++ 
-        intercalate " also " (map (\(n, e') -> show n ++ " = " 
+        intercalate " also " (map (\(n, _, e') -> show n ++ " = " 
         ++ show e') l) ++ " in " ++ show e
     show (If cond e1 e2) = "if " ++ show cond ++ " then " ++ show e1 ++ 
         " else " ++ show e2
