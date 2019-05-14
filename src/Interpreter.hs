@@ -45,8 +45,10 @@ interpretPhrase (Value letdef) = do
     m <- case tld of
         Fun list -> either throwError return $ seqPair $ map (ev env) list
         Rec list -> do
-            let sch = _schemes env
-            ty <- either throwError return $ E.inferTypeRec sch list
+            let sm   = _schemes env
+                alg  = _algtypes env
+                cons = _constructors env
+            ty <- either throwError return $ E.inferTypeRec sm (alg, cons) list
             return $ zipType (fixed env list) ty
             where
                 zipType ((n, v):tv) t = (n, (v, t)):(zipType tv t)
@@ -66,10 +68,10 @@ interpretPhrase (TypeDecl typedef) = do
     ttd <- either throwError return $ translateTypeDef typedef
     let (tname, tdef) = ttd
     let tmap = Map.insert tname tdef $ _algtypes env
-    let cons = map (\(n, _) -> (n, tname)) $ V._consdef tdef
+    let cons = map (\(n, _) -> (n, tname)) $ E._consdef tdef
     let cmap = Map.union (Map.fromList cons) (_constructors env)
     put $ env { _constructors = cmap, _algtypes = tmap }
-    return . pure $ InterType tname (V._consdef tdef)
+    return . pure $ InterType tname (E._consdef tdef)
 
 translateExpr :: Expr -> TransRes E.Expr
 translateExpr (EId (VIdent n)) = pure $ E.Var n
@@ -237,13 +239,13 @@ translateMatching (MatchCase p expr) = do
     te <- translateExpr expr
     pure $ (tp, te)
 
-translateTypeDef :: TypeDef -> TransRes (Name, V.TypeDef)
+translateTypeDef :: TypeDef -> TransRes (Name, E.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
     let mpolys = map (\(TPolyIdent s) ->  E.TVar s) polys
     tl <- sequence $ map translateTypeCons ltcons
     let check = foldl (&&) True $ map (checkType mpolys) $ flattenTypes tl
     if not check then Left "Unbound type parameters" else return $ 
-        (t, V.TypeDef { V._polys = mpolys, V._consdef = tl })
+        (t, E.TypeDef { E._polys = mpolys, E._consdef = tl })
     where
         flattenTypes ((_, ts):t) = ts ++ (flattenTypes t)
         flattenTypes [] = []
@@ -257,6 +259,6 @@ translateType :: Type -> E.Type
 translateType TInt = E.TInt
 translateType TBool = E.TBool
 translateType (TList t) = E.TList $ translateType t
--- translateType (TAlgebraic (TIdent t)) = E.TAlg t
+translateType (TAlgebraic (TIdent t)) = E.TAlg t
 translateType (TPoly (TPolyIdent t)) = E.TVar t
 translateType (TFun t1 t2) = E.TFun (translateType t1) (translateType t2)

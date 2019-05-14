@@ -5,18 +5,13 @@ import Expr
 import qualified Data.Map as Map
 import Data.List (intercalate)
 
-data TypeDef = TypeDef { _polys :: [Type], _consdef :: [(Name, [Type])] }
-
 type ValMap = Map.Map Name Value
-type TypeName = String
-type ConsMap = Map.Map Name TypeName
-type AlgTypeMap = Map.Map TypeName TypeDef
 
 data Env = Env 
-    { _values :: ValMap
+    { _values       :: ValMap
     , _constructors :: ConsMap
-    , _algtypes  :: AlgTypeMap
-    , _schemes :: SchemeMap }
+    , _algtypes     :: AlgTypeMap
+    , _schemes      :: SchemeMap }
 
 emptyEnv :: Env
 emptyEnv = Env { _values = Map.empty
@@ -67,6 +62,7 @@ instance Show Value where
                 VNil -> ""
                 _ -> "?"
     show VNil = "[]"
-    show (VAlg name _ lv) = name ++ "(" ++ intercalate ", " (map show lv) 
-        ++ ")"
+    show (VAlg name _ lv) = name ++ 
+        if length lv > 0 then " (" ++ intercalate ", " (map show lv) ++ ")"
+        else ""
     show (VCase n l _) = "<pattern-match>"

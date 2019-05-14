@@ -34,24 +34,29 @@ fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
-    -- typed <- typeCheck env expr
     let schemes = _schemes env
-    typed <- inferType schemes expr
+        algs    = _algtypes env
+        cons    = _constructors env
+    typed <- inferType schemes (algs, cons) expr
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
 evalCheck :: Env -> Expr -> Type -> Either String (Value, Type)
 evalCheck env expr t = do
     let schemes = _schemes env
-    typed <- checkType schemes expr t
+        algs    = _algtypes env
+        cons    = _constructors env
+    typed <- checkType schemes (algs, cons) expr t
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
 typeCheck :: Env -> Expr -> Maybe Type -> Either String Type
 typeCheck env expr t = do
     let tv = maybe (TVar "a") id t
-    let schemes = _schemes env
-    either throwError return $ checkType schemes expr tv
+        schemes = _schemes env
+        algs    = _algtypes env
+        cons    = _constructors env
+    either throwError return $ checkType schemes (algs, cons) expr tv
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
