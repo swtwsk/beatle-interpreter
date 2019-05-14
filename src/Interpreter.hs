@@ -5,20 +5,15 @@ module Interpreter where
 import System.Console.Haskeline
 import Control.Monad.State
 import Control.Monad.Except
-import Data.Functor.Identity
 import qualified Data.Map as Map
 
 import AbsBeatle
 import Utils
 
 import Lambda
-import Values hiding (TypeDef(..))
-import qualified Values as V
 import qualified Expr as E
 
-
-data InterRes = InterVal [(Maybe Name, Value, E.Type)]
-              | InterType Name [(Name, [E.Type])]
+type InterRes = [(Maybe Name, Value, E.Type)]
 
 type TransRes = Either String
 type Result = TransRes InterRes
@@ -37,7 +32,7 @@ interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     env <- get
     let ev = either Left (eval env) $ translateExpr e
-    return $ either Left (\(v, t) -> return $ InterVal [(Nothing, v, t)]) ev
+    return $ either Left (\(v, t) -> return [(Nothing, v, t)]) ev
 interpretPhrase (Value letdef) = do
     env <- get
     let vmap = _values env
@@ -57,7 +52,7 @@ interpretPhrase (Value letdef) = do
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
     let extr = map (\(n, v, t) -> (pure n, v, t)) ms
-    return . pure . InterVal $ extr
+    return . pure $ extr
     where
         ev env (name, expr) = (name, eval env expr)
         extractVar (n, (v, t)) = pure (n, v, t)

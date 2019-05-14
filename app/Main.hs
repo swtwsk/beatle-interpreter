@@ -12,6 +12,7 @@ import Control.Monad.IO.Class
 import Control.Monad.State
 import Control.Monad.Except
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import System.Console.Haskeline
 
 title :: [String]
@@ -30,13 +31,9 @@ myLLexer = resolveLayout True . myLexer
 
 eitherFunc :: Either String InterRes -> IState [String]
 eitherFunc (Left err) = return [err]
-eitherFunc (Right (InterType tn l)) = 
-    return ["type " ++ tn ++ " = " ++ intercalate " | " (map showType l)]
+eitherFunc (Right l) = return $ map showVal l
     where
-        showType (name, tlist) = name ++ " " ++ unwords (map show tlist)
-eitherFunc (Right (InterVal l)) = return $ map showVal l
-    where
-        showVal (name, val, t) = (maybe "-" id name) ++ " : " ++ show t 
+        showVal (name, val, t) = fromMaybe "-" name ++ " : " ++ show t 
             ++ " = " ++ show val
 
 process :: String -> IState ()
