@@ -21,10 +21,12 @@ module Expr(
 ) where
 
 import Data.List (intercalate)
+import Data.Maybe
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Functor.Identity
@@ -96,27 +98,27 @@ class Types a where
     apply :: Subst -> a -> a     -- applies substitution to type expr
 
 instance Types Type where
-    ftv (TInt)        = Set.empty
-    ftv (TBool)       = Set.empty
+    ftv TInt         = Set.empty
+    ftv TBool        = Set.empty
     ftv (TFun t1 t2)  = Set.union (ftv t1) (ftv t2)
     ftv (TVar n)      = Set.singleton n
     ftv (TList t)     = Set.empty
     ftv (TAlgT alg t) = foldr (\t acc -> Set.union (ftv t) acc) Set.empty t
 
-    apply s v@(TVar n)    = maybe v id $ Map.lookup n s
+    apply s v@(TVar n)    = fromMaybe v $ Map.lookup n s
     apply s (TFun t1 t2)  = TFun (apply s t1) (apply s t2)
     apply s (TList t)     = TList (apply s t)
     apply s (TAlgT alg t) = TAlgT alg (map (apply s) t)
     apply s t             = t
 
 instance Types Scheme where
-    ftv (Scheme vars t)     = (ftv t) `Set.difference` (Set.fromList vars)
+    ftv (Scheme vars t)     = ftv t `Set.difference` Set.fromList vars
     apply s (Scheme vars t) = Scheme vars (apply (foldr Map.delete s vars) t)
 
 -- Generalization for lists
 instance Types a => Types [a] where
     apply s = map (apply s)
-    ftv l   = foldr Set.union Set.empty $ map ftv l
+    ftv     = foldr (Set.union . ftv) Set.empty
 
 emptySubst :: Subst
 emptySubst = Map.empty
@@ -124,7 +126,7 @@ emptySubst = Map.empty
 composeSubst :: Subst -> Subst -> Subst
 -- Substitute every bound variable from s2 with proper s1 substitution
 -- and concatenate rest of s1 to it
-composeSubst s1 s2 = (Map.map (apply s1) s2) `Map.union` s1
+composeSubst s1 s2 = Map.map (apply s1) s2 `Map.union` s1
 
 type SchemeMap = Map.Map String Scheme
 newtype GammaEnv = GammaEnv SchemeMap deriving (Show)
@@ -152,7 +154,7 @@ tcmFresh :: TCM Type
 tcmFresh = do
     s <- get
     let c@(_:h:t) = _supply s
-        next    = if h == 'z' then "\'a" ++ (h:t) else '\'':(succ h):t
+        next    = if h == 'z' then "\'a" ++ (h:t) else '\'': succ h :t
     put s { _supply = next }
     return $ TVar c
 
@@ -166,7 +168,7 @@ runTCM (alg, cons) t = runExcept $ runStateT t initState
 -- replace all bound type variables in a type scheme with fresh type variables
 instantiate :: Scheme -> TCM Type
 instantiate (Scheme vars t) = do
-    nvars <- mapM (\_ -> tcmFresh) vars
+    nvars <- mapM (const tcmFresh) vars
     let s = Map.fromList (zip vars nvars)
     return $ apply s t
 
@@ -222,7 +224,7 @@ instance TypeCheck Lit where
         t <- case l of
             LInt _  -> return TInt
             LBool _ -> return TBool
-            LNil    -> tcmFresh >>= return . TList
+            LNil    -> fmap TList tcmFresh
         return (emptySubst, t)
 
 instance TypeCheck Expr where
@@ -234,7 +236,7 @@ instance TypeCheck Expr where
     ti env (Lam (PVar n) e) = do
         tv <- tcmFresh
         let GammaEnv env' = remove env n
-            env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
+            env'' = GammaEnv $ env' `Map.union` Map.singleton n (Scheme [] tv)
         (s1, t1) <- ti env'' e
         return (s1, TFun (apply s1 tv) t1)
     ti env (Lam (PConst k) e) = ti env k >> ti env e
@@ -258,8 +260,8 @@ instance TypeCheck Expr where
         return (s1'' `composeSubst` s2, t2)
     ti env (LetRec l e) = do
         (s1, t1, env') <- typeRec env l
-        let xs = map (\(n, _) -> n) l
-            GammaEnv env2' = foldr (\x env -> remove env x) env' xs
+        let xs = map fst l
+            GammaEnv env2' = foldr (flip remove) env' xs
             t' = generalize (apply s1 env) t1
             env2'' = GammaEnv $ foldr (\x env -> Map.insert x t' env) env2' xs
         (s2, t2) <- ti (apply s1 env2'') e
@@ -327,7 +329,7 @@ instance TypeCheck Expr where
             List.lookup n $ _consdef typedef
         let clen = length ctypes
             elen = length le
-        _ <- if clen /= elen then throwError $ countErr clen elen else return ()
+        _ <- when (clen /= elen) $ throwError $ countErr clen elen
         ste <- foldM foldExp [] le
         let s  = foldl composeSubst emptySubst $ map fst ste
             ts = zip ctypes $ map snd ste
@@ -363,7 +365,7 @@ caseCheckType :: GammaEnv -> (Pattern, Expr) -> TCM (Subst, Type, Type)
 caseCheckType env (PVar n, e) = do
     tv <- tcmFresh
     let GammaEnv env' = remove env n
-        env'' = GammaEnv (env' `Map.union` (Map.singleton n (Scheme [] tv)))
+        env'' = GammaEnv $ env' `Map.union` Map.singleton n (Scheme [] tv)
     (sp, tp) <- ti env'' (PVar n)
     (se, te) <- ti (apply sp env'') e
     return (se `composeSubst` sp, apply se tp, apply se te)
@@ -389,10 +391,9 @@ typeRec env l = do
     let tfix = 
             TFun (foldr (\_ acc -> TFun tv acc) (TFun tv tv) (tail l)) tv
         GammaEnv env' = remove env "fix"
-        env'' = GammaEnv $ 
-            env' `Map.union` (Map.singleton "fix" (Scheme [] tfix))
+        env'' = GammaEnv $ env' `Map.union` Map.singleton "fix" (Scheme [] tfix)
         yfs = map (\(n, e) -> ("_y_" ++ n, transLambda l e)) l
-        ys  = 
+        ys  =
             map (\(n, _) -> transYLambda yfs (App (Var "fix") (Var n))) yfs
     ss <- mapM (ti env'') ys
     let s = foldr (\(s, _) acc -> s `composeSubst` acc) Map.empty ss
@@ -411,7 +412,7 @@ patEnv :: Pattern -> Maybe Type -> GammaEnv -> TCM GammaEnv
 patEnv (PVar n) t env = do
     tv <- maybe tcmFresh return t
     let GammaEnv env' = remove env n
-    return $ GammaEnv $ env' `Map.union` (Map.singleton n (Scheme [] tv))
+    return $ GammaEnv $ env' `Map.union` Map.singleton n (Scheme [] tv)
 patEnv (PConst k) t env = do
     tv <- maybe tcmFresh return t
     (sk, tk) <- ti env (PConst k)
@@ -557,4 +558,4 @@ instance Show Type where
         TVar s -> s
         TList t -> "[" ++ show t ++ "]"
         TAlg s -> "\"" ++ s ++ "\""
-        TAlgT s ts -> s ++ " " ++ intercalate " " (map show ts)
+        TAlgT s ts -> s ++ " " ++ unwords (map show ts)

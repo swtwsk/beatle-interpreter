@@ -36,8 +36,8 @@ interpretLine (Line phr) = interpretPhrase phr
 interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     env <- get
-    ev <- return $ either Left (eval env) $ translateExpr e
-    return $ either Left (\(v, t) -> return $ InterVal [(Nothing, v, t)]) $ ev
+    let ev = either Left (eval env) $ translateExpr e
+    return $ either Left (\(v, t) -> return $ InterVal [(Nothing, v, t)]) ev
 interpretPhrase (Value letdef) = do
     env <- get
     let vmap = _values env
@@ -51,14 +51,14 @@ interpretPhrase (Value letdef) = do
             ty <- either throwError return $ E.inferTypeRec sm (alg, cons) list
             return $ zipType (fixed env list) ty
             where
-                zipType ((n, v):tv) t = (n, (v, t)):(zipType tv t)
+                zipType ((n, v):tv) t = (n, (v, t)) : zipType tv t
                 zipType [] _ = []
     ms <- mapM (either throwError return . extractVar) m
     let m' = map (\(n, v, _) -> (n, v)) ms
     let t' = map (\(n, _, t) -> (n, E.Scheme [] t)) ms
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
-    extr <- return $ map (\(n, v, t) -> (pure n, v, t)) ms
+    let extr = map (\(n, v, t) -> (pure n, v, t)) ms
     return . pure . InterVal $ extr
     where
         ev env (name, expr) = (name, eval env expr)
@@ -172,7 +172,7 @@ translateExpr (ELambda vlist e) = do
             h:t -> E.Lam (E.PVar $ translateLambdaVI h) (transLambda t e)
             [] -> e
 translateExpr (EList elist) = do
-    tlist <- sequence $ map translateExpr elist
+    tlist <- mapM translateExpr elist
     pure . trans $ tlist
     where 
         trans l = case l of
@@ -180,15 +180,15 @@ translateExpr (EList elist) = do
             [] -> E.Lit E.LNil
 translateExpr (ETypeAlg (TIdent t)) = pure $ E.AlgCons t []
 translateExpr (ETypeCons (TIdent t) elist) = do
-    tlist <- sequence $ map translateExpr elist
+    tlist <- mapM translateExpr elist
     pure $ E.AlgCons t tlist
 
 translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
     Let letbinds -> 
-        either Left (pure . Fun) $ sequence $ map translateLetBind letbinds
+        either Left (pure . Fun) $ mapM translateLetBind letbinds
     LetRec letbinds -> 
-        either Left (pure . Rec) $ sequence $ map translateLetBind letbinds
+        either Left (pure . Rec) $ mapM translateLetBind letbinds
 
 translateLetBind :: LetBind -> TransRes (Name, E.Expr)
 translateLetBind (ConstBind lvi e) = do
@@ -196,7 +196,7 @@ translateLetBind (ConstBind lvi e) = do
     te <- translateExpr e
     pure (n, te)
 translateLetBind (ProcBind (ProcNameId (VIdent proc)) il e) = do
-    til <- sequence $ map translateLetLVI il
+    til <- mapM translateLetLVI il
     te <- translateExpr e
     pure (proc, transLambda til te)
     where
@@ -209,7 +209,7 @@ translateLetLVI (LetLVI lvi) = pure $ translateLambdaVI lvi
 
 translateLambdaVI :: LambdaVI -> Name
 translateLambdaVI (LambdaVId (VIdent n)) = n
-translateLambdaVI (WildVId) = "_"
+translateLambdaVI WildVId = "_"
 
 translatePattern :: Pattern -> TransRes E.Pattern
 translatePattern (PId (VIdent n)) = pure $ E.PVar n
@@ -220,7 +220,7 @@ translatePattern PWildcard = pure . E.PVar $ "_"
 translatePattern PListEmpty = pure . E.PConst $ LNil
 translatePattern (PTypeAlg t) = Left "Pattern: PTypeAlg unimplemented"
 translatePattern (PList plist) = do
-    tlist <- sequence $ map translatePattern plist
+    tlist <- mapM translatePattern plist
     pure . trans $ tlist
     where 
         trans l = case l of
@@ -237,23 +237,23 @@ translateMatching :: Matching -> TransRes (E.Pattern, E.Expr)
 translateMatching (MatchCase p expr) = do
     tp <- translatePattern p
     te <- translateExpr expr
-    pure $ (tp, te)
+    pure (tp, te)
 
 translateTypeDef :: TypeDef -> TransRes (Name, E.TypeDef)
 translateTypeDef (TDef (TIdent t) polys ltcons) = do
     let mpolys = map (\(TPolyIdent s) ->  E.TVar s) polys
-    tl <- sequence $ map translateTypeCons ltcons
-    let check = foldl (&&) True $ map (checkType mpolys) $ flattenTypes tl
-    if not check then Left "Unbound type parameters" else return $ 
+    tl <- mapM translateTypeCons ltcons
+    let check = all (checkType mpolys) $ flattenTypes tl
+    if not check then Left "Unbound type parameters" else return 
         (t, E.TypeDef { E._polys = mpolys, E._consdef = tl })
     where
-        flattenTypes ((_, ts):t) = ts ++ (flattenTypes t)
+        flattenTypes ((_, ts):t) = ts ++ flattenTypes t
         flattenTypes [] = []
-        checkType pols t@(E.TVar _) = any ((==) t) pols
+        checkType pols t@(E.TVar _) = t `elem` pols
         checkType _ _ = True
 
 translateTypeCons :: TypeCons -> TransRes (Name, [E.Type])
-translateTypeCons (TCons (TIdent t) types) = pure $ (t, map translateType types)
+translateTypeCons (TCons (TIdent t) types) = pure (t, map translateType types)
 
 translateType :: Type -> E.Type
 translateType TInt = E.TInt
