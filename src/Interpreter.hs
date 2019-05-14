@@ -46,9 +46,7 @@ interpretPhrase (Value letdef) = do
         Fun list -> either throwError return $ seqPair $ map (ev env) list
         Rec list -> do
             let sm   = _schemes env
-                alg  = _algtypes env
-                cons = _constructors env
-            ty <- either throwError return $ E.inferTypeRec sm (alg, cons) list
+            ty <- either throwError return $ E.inferTypeRec sm list
             return $ zipType (fixed env list) ty
             where
                 zipType ((n, v):tv) t = (n, (v, t)) : zipType tv t
@@ -63,15 +61,6 @@ interpretPhrase (Value letdef) = do
     where
         ev env (name, expr) = (name, eval env expr)
         extractVar (n, (v, t)) = pure (n, v, t)
-interpretPhrase (TypeDecl typedef) = do
-    env <- get
-    ttd <- either throwError return $ translateTypeDef typedef
-    let (tname, tdef) = ttd
-    let tmap = Map.insert tname tdef $ _algtypes env
-    let cons = map (\(n, _) -> (n, tname)) $ E._consdef tdef
-    let cmap = Map.union (Map.fromList cons) (_constructors env)
-    put $ env { _constructors = cmap, _algtypes = tmap }
-    return . pure $ InterType tname (E._consdef tdef)
 
 translateExpr :: Expr -> TransRes E.Expr
 translateExpr (EId (VIdent n)) = pure $ E.Var n
@@ -178,10 +167,6 @@ translateExpr (EList elist) = do
         trans l = case l of
             h:t -> E.Cons h (trans t)
             [] -> E.Lit E.LNil
-translateExpr (ETypeAlg (TIdent t)) = pure $ E.AlgCons t []
-translateExpr (ETypeCons (TIdent t) elist) = do
-    tlist <- mapM translateExpr elist
-    pure $ E.AlgCons t tlist
 
 translateLetDef :: LetDef -> TransRes Fun
 translateLetDef ld = case ld of
@@ -218,7 +203,6 @@ translatePattern PTrue = pure . E.PConst $ LBool True
 translatePattern PFalse = pure . E.PConst $ LBool False
 translatePattern PWildcard = pure . E.PVar $ "_"
 translatePattern PListEmpty = pure . E.PConst $ LNil
-translatePattern (PTypeAlg t) = Left "Pattern: PTypeAlg unimplemented"
 translatePattern (PList plist) = do
     tlist <- mapM translatePattern plist
     pure . trans $ tlist
@@ -226,8 +210,6 @@ translatePattern (PList plist) = do
         trans l = case l of
             h:t -> E.PCons h (trans t)
             []  -> E.PConst E.LNil
-translatePattern (PTypeAlgRec tid pnest) = 
-    Left "Pattern: PTypeAlgRec unimplemented"
 translatePattern (PListCons p1 p2) = do
     tp1 <- translatePattern p1
     tp2 <- translatePattern p2
@@ -238,27 +220,3 @@ translateMatching (MatchCase p expr) = do
     tp <- translatePattern p
     te <- translateExpr expr
     pure (tp, te)
-
-translateTypeDef :: TypeDef -> TransRes (Name, E.TypeDef)
-translateTypeDef (TDef (TIdent t) polys ltcons) = do
-    let mpolys = map (\(TPolyIdent s) ->  E.TVar s) polys
-    tl <- mapM translateTypeCons ltcons
-    let check = all (checkType mpolys) $ flattenTypes tl
-    if not check then Left "Unbound type parameters" else return 
-        (t, E.TypeDef { E._polys = mpolys, E._consdef = tl })
-    where
-        flattenTypes ((_, ts):t) = ts ++ flattenTypes t
-        flattenTypes [] = []
-        checkType pols t@(E.TVar _) = t `elem` pols
-        checkType _ _ = True
-
-translateTypeCons :: TypeCons -> TransRes (Name, [E.Type])
-translateTypeCons (TCons (TIdent t) types) = pure (t, map translateType types)
-
-translateType :: Type -> E.Type
-translateType TInt = E.TInt
-translateType TBool = E.TBool
-translateType (TList t) = E.TList $ translateType t
-translateType (TAlgebraic (TIdent t)) = E.TAlg t
-translateType (TPoly (TPolyIdent t)) = E.TVar t
-translateType (TFun t1 t2) = E.TFun (translateType t1) (translateType t2)

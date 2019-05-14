@@ -9,10 +9,6 @@ module Expr(
     Scheme(..),
     SchemeMap,
     GammaEnv(..),
-    TypeName,
-    TypeDef(..),
-    AlgTypeMap,
-    ConsMap,
     Arity(..),
     inferType,
     inferTypeRec,
@@ -43,7 +39,6 @@ data Expr = Var Name
           | BinOp BinOp Expr Expr
           | UnOp UnOp Expr
           | Cons Expr Expr                   -- list
-          | AlgCons Name [Expr]
           | Case Name [(Pattern, Expr)]
           | Typed Expr Type
 
@@ -64,15 +59,7 @@ data Type = TInt
           | TFun Type Type
           | TVar String
           | TList Type
-          | TAlg String  -- placeholder type
-          | TAlgT String [Type]
           deriving (Eq)
-
-type TypeName = String
-data TypeDef = TypeDef { _polys   :: [Type]
-                       , _consdef :: [(Name, [Type])] } deriving (Show)
-type AlgTypeMap = Map.Map TypeName TypeDef
-type ConsMap = Map.Map Name TypeName
 
 class Arity a where
     arity :: a -> Int
@@ -103,12 +90,10 @@ instance Types Type where
     ftv (TFun t1 t2)  = Set.union (ftv t1) (ftv t2)
     ftv (TVar n)      = Set.singleton n
     ftv (TList t)     = Set.empty
-    ftv (TAlgT alg t) = foldr (\t acc -> Set.union (ftv t) acc) Set.empty t
 
     apply s v@(TVar n)    = fromMaybe v $ Map.lookup n s
     apply s (TFun t1 t2)  = TFun (apply s t1) (apply s t2)
     apply s (TList t)     = TList (apply s t)
-    apply s (TAlgT alg t) = TAlgT alg (map (apply s) t)
     apply s t             = t
 
 instance Types Scheme where
@@ -144,9 +129,7 @@ generalize env t = Scheme vars t
     where vars = Set.toList (Set.difference (ftv t) (ftv env))
 
 data TcState = TcState { _supply :: String
-                       , _subst  :: Subst
-                       , _algs   :: AlgTypeMap
-                       , _cons   :: ConsMap } deriving (Show)
+                       , _subst  :: Subst } deriving (Show)
 
 type TCM a = StateT TcState (Except String) a
 
@@ -158,12 +141,10 @@ tcmFresh = do
     put s { _supply = next }
     return $ TVar c
 
-runTCM :: (AlgTypeMap, ConsMap) -> TCM a -> Either String (a, TcState)
-runTCM (alg, cons) t = runExcept $ runStateT t initState
+runTCM :: TCM a -> Either String (a, TcState)
+runTCM t = runExcept $ runStateT t initState
     where initState = TcState { _supply = "\'a"
-                              , _subst = Map.empty
-                              , _algs = alg
-                              , _cons = cons }
+                              , _subst = Map.empty }
 
 -- replace all bound type variables in a type scheme with fresh type variables
 instantiate :: Scheme -> TCM Type
@@ -176,28 +157,12 @@ unify :: Type -> Type -> TCM Subst
 unify TInt TInt   = return emptySubst
 unify TBool TBool = return emptySubst
 unify (TList t1) (TList t2) = unify t1 t2
-unify (TAlgT a at) (TAlgT b bt) | a == b && length at == length bt = do
-    let zt = zip at bt
-    types <- foldM foldf [emptySubst] zt
-    return (foldl composeSubst emptySubst types)
-    where
-        foldf :: [Subst] -> (Type, Type) -> TCM [Subst]
-        foldf s (t, t') = do
-            let s1 = head s
-            s2 <- unify (apply s1 t) (apply s1 t')
-            return $ s2:s
 unify (TVar a) b = varBind a b
 unify a (TVar b) = varBind b a
 unify (TFun l r) (TFun l' r') = do
     s1 <- unify l l'
     s2 <- unify (apply s1 r) (apply s1 r')
     return (s1 `composeSubst` s2)
-unify a@(TAlg _) b = do
-    ta <- getAlgType a
-    unify ta b
-unify a b@(TAlg _) = do
-    tb <- getAlgType b
-    unify a tb
 unify t1 t2 = 
     throwError $ "Type: Types do not unify: " ++ show t1 ++ " and " ++ show t2
 
@@ -207,14 +172,6 @@ varBind u t | t == TVar u = return emptySubst
                 throwError $ "Type: Occur check fails: " ++ u ++ " vs. " 
                 ++ show t
             | otherwise = return (Map.singleton u t)
-
-getAlgType :: Type -> TCM Type
-getAlgType t@(TAlg alg) = do
-    st <- get
-    typedef <- case Map.lookup alg (_algs st) of
-        Nothing -> throwError $ "Type: Unknown type " ++ show t
-        Just td -> return td
-    return $ TAlgT alg $ _polys typedef
 
 class TypeCheck a where
     ti :: GammaEnv -> a -> TCM (Subst, Type)
@@ -240,7 +197,6 @@ instance TypeCheck Expr where
         (s1, t1) <- ti env'' e
         return (s1, TFun (apply s1 tv) t1)
     ti env (Lam (PConst k) e) = ti env k >> ti env e
-    ti _ (Lam (PCons _ _) _) = throwError "Type: PCons unimplemented"
     ti env (Lit l) = ti env l
     ti env (App e1 e2) = do
         tv <- tcmFresh
@@ -318,38 +274,6 @@ instance TypeCheck Expr where
         (s2, t2) <- ti (apply s1 env) e2
         s3 <- unify (apply s2 (TList t1)) t2
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 t2)
-    ti env (AlgCons n le) = do
-        st <- get
-        typename <- maybe (throwError consErr) return $
-            Map.lookup n $ _cons st
-        typedef <- maybe (throwError $ typeErr typename) return $
-            Map.lookup typename $ _algs st
-        t <- getAlgType (TAlg typename)
-        ctypes <- maybe (throwError consErr) return $
-            List.lookup n $ _consdef typedef
-        let clen = length ctypes
-            elen = length le
-        _ <- when (clen /= elen) $ throwError $ countErr clen elen
-        ste <- foldM foldExp [] le
-        let s  = foldl composeSubst emptySubst $ map fst ste
-            ts = zip ctypes $ map snd ste
-        s' <- mapM (\(tc, te) -> unify (apply s tc) te) ts
-        let s'' = foldr composeSubst emptySubst s'
-        return (s'', apply s'' t)
-        where
-            consErr = "Type: Unknown type constructor " ++ n
-            typeErr t = "Type: Unknown type " ++ show t
-            countErr c1 c2 = "Type: The constructor " ++ n ++ " expects " ++
-                show c1 ++ " argument(s),\nbut is applied here to " ++
-                show c2 ++ " argument(s)"
-            foldExp :: [(Subst, Type)] -> Expr -> TCM [(Subst, Type)]
-            foldExp l@((s,_):_) e = do
-                st <- ti (apply s env) e
-                return $ st:l
-            foldExp [] e = do
-                st <- ti env e
-                return [st]
-
     ti env (Case n l) = do
         (sn, tn)       <- ti env (Var n)
         tl <- mapM (caseCheckType (apply sn env)) l
@@ -460,21 +384,20 @@ typeInference env e = do
     (s, t) <- ti (GammaEnv env) e
     return (apply s t)
 
-inferType :: SchemeMap -> (AlgTypeMap, ConsMap) -> Expr -> Either String Type
-inferType sm ac e = do
-    (res, _) <- runTCM ac (typeInference sm e)
+inferType :: SchemeMap -> Expr -> Either String Type
+inferType sm e = do
+    (res, _) <- runTCM $ typeInference sm e
     return res
 
-inferTypeRec :: SchemeMap -> (AlgTypeMap, ConsMap) -> [(Name, Expr)] 
+inferTypeRec :: SchemeMap -> [(Name, Expr)] 
     -> Either String Type
-inferTypeRec sm ac l = do
-    ((_, res, _), _) <- runTCM ac (typeRec (GammaEnv sm) l)
+inferTypeRec sm l = do
+    ((_, res, _), _) <- runTCM $ typeRec (GammaEnv sm) l
     return res
 
-checkType :: SchemeMap -> (AlgTypeMap, ConsMap) -> Expr -> Type 
-    -> Either String Type
-checkType sm ac e t = do
-    (res, _) <- runTCM ac $ do
+checkType :: SchemeMap -> Expr -> Type -> Either String Type
+checkType sm e t = do
+    (res, _) <- runTCM $ do
         (s1, t1) <- ti (GammaEnv sm) e
         s <- unify t t1
         return (apply (s1 `composeSubst` s) t1)
@@ -496,8 +419,6 @@ instance Show Expr where
     show (BinOp op e1 e2) = show e1 ++ " " ++ show op ++ " " ++ show e2
     show (UnOp op e) = show op ++ " " ++ show e
     show (Cons e1 e2) = show e1 ++ " :: " ++ show e2
-    show (AlgCons n le) = n ++ " of (" ++ intercalate ", " (map show le) 
-        ++ ")"
     show (Case n l) = "match " ++ n ++ " with { " ++ 
         intercalate "; " (map (\(p, e) -> 
             "case " ++ show p ++ " -> " ++ show e) l) ++ " }"
@@ -557,5 +478,3 @@ instance Show Type where
         TFun t1 t2 -> "(" ++ show t1 ++ ") -> " ++ show t2
         TVar s -> s
         TList t -> "[" ++ show t ++ "]"
-        TAlg s -> "\"" ++ s ++ "\""
-        TAlgT s ts -> s ++ " " ++ unwords (map show ts)

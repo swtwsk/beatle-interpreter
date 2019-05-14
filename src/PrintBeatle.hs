@@ -84,14 +84,6 @@ instance Print Integer where
 instance Print Double where
   prt _ x = doc (shows x)
 
-instance Print TIdent where
-  prt _ (TIdent i) = doc (showString i)
-
-instance Print TPolyIdent where
-  prt _ (TPolyIdent i) = doc (showString i)
-  prtList _ [] = concatD []
-  prtList _ (x:xs) = concatD [prt 0 x, prt 0 xs]
-
 instance Print VIdent where
   prt _ (VIdent i) = doc (showString i)
 
@@ -107,7 +99,6 @@ instance Print Phrase where
   prt i e = case e of
     Value letdef -> prPrec i 0 (concatD [prt 0 letdef])
     Expression expr -> prPrec i 0 (concatD [prt 0 expr])
-    TypeDecl typedef -> prPrec i 0 (concatD [prt 0 typedef])
   prtList _ [] = concatD []
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ";;"), prt 0 xs]
 
@@ -138,26 +129,16 @@ instance Print [LetLVI] where
 instance Print [LetBind] where
   prt = prtList
 
-instance Print PNested where
-  prt i e = case e of
-    PAlgWild -> prPrec i 0 (concatD [doc (showString "_")])
-    PAlgList patterns -> prPrec i 0 (concatD [doc (showString "("), prt 1 patterns, doc (showString ")")])
-
 instance Print Pattern where
   prt i e = case e of
-    PId vident -> prPrec i 5 (concatD [prt 0 vident])
-    PInt n -> prPrec i 5 (concatD [prt 0 n])
-    PTrue -> prPrec i 5 (concatD [doc (showString "True")])
-    PFalse -> prPrec i 5 (concatD [doc (showString "False")])
-    PWildcard -> prPrec i 5 (concatD [doc (showString "_")])
-    PListEmpty -> prPrec i 5 (concatD [doc (showString "[]")])
-    PTypeAlg tident -> prPrec i 5 (concatD [prt 0 tident])
-    PList patterns -> prPrec i 4 (concatD [doc (showString "["), prt 4 patterns, doc (showString "]")])
-    PTypeAlgRec tident pnested -> prPrec i 3 (concatD [doc (showString "("), prt 0 tident, prt 0 pnested, doc (showString ")")])
-    PListCons pattern1 pattern2 -> prPrec i 1 (concatD [prt 5 pattern1, doc (showString "::"), prt 1 pattern2])
-  prtList 4 [x] = concatD [prt 4 x]
-  prtList 4 (x:xs) = concatD [prt 4 x, doc (showString ","), prt 4 xs]
-  prtList 1 [] = concatD []
+    PId vident -> prPrec i 2 (concatD [prt 0 vident])
+    PInt n -> prPrec i 2 (concatD [prt 0 n])
+    PTrue -> prPrec i 2 (concatD [doc (showString "True")])
+    PFalse -> prPrec i 2 (concatD [doc (showString "False")])
+    PWildcard -> prPrec i 2 (concatD [doc (showString "_")])
+    PListEmpty -> prPrec i 2 (concatD [doc (showString "[]")])
+    PList patterns -> prPrec i 1 (concatD [doc (showString "["), prt 1 patterns, doc (showString "]")])
+    PListCons pattern1 pattern2 -> prPrec i 0 (concatD [prt 2 pattern1, doc (showString "::"), prt 0 pattern2])
   prtList 1 [x] = concatD [prt 1 x]
   prtList 1 (x:xs) = concatD [prt 1 x, doc (showString ","), prt 1 xs]
 
@@ -168,7 +149,6 @@ instance Print Expr where
     ETrue -> prPrec i 9 (concatD [doc (showString "True")])
     EFalse -> prPrec i 9 (concatD [doc (showString "False")])
     EListEmpty -> prPrec i 9 (concatD [doc (showString "[]")])
-    ETypeAlg tident -> prPrec i 9 (concatD [prt 0 tident])
     EList exprs -> prPrec i 9 (concatD [doc (showString "["), prt 0 exprs, doc (showString "]")])
     EApp expr1 expr2 -> prPrec i 8 (concatD [prt 8 expr1, prt 9 expr2])
     ENeg expr -> prPrec i 6 (concatD [doc (showString "-"), prt 7 expr])
@@ -191,7 +171,6 @@ instance Print Expr where
     ELetIn letdef expr -> prPrec i 0 (concatD [prt 0 letdef, doc (showString "in"), prt 0 expr])
     EMatch vident matchings -> prPrec i 0 (concatD [doc (showString "match"), prt 0 vident, doc (showString "with"), doc (showString "{"), prt 0 matchings, doc (showString "}")])
     ELambda lambdavis expr -> prPrec i 0 (concatD [doc (showString "\\"), prt 0 lambdavis, doc (showString "->"), prt 0 expr])
-    ETypeCons tident exprs -> prPrec i 0 (concatD [prt 0 tident, doc (showString "of"), doc (showString "("), prt 0 exprs, doc (showString ")")])
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
 
@@ -220,34 +199,4 @@ instance Print Matching where
 instance Print ProcName where
   prt i e = case e of
     ProcNameId vident -> prPrec i 0 (concatD [prt 0 vident])
-
-instance Print TypeDef where
-  prt i e = case e of
-    TDef tident tpolyidents typeconss -> prPrec i 0 (concatD [doc (showString "type"), prt 0 tident, prt 0 tpolyidents, doc (showString "="), prt 0 typeconss])
-
-instance Print TypeCons where
-  prt i e = case e of
-    TCons tident types -> prPrec i 0 (concatD [prt 0 tident, prt 0 types])
-  prtList _ [x] = concatD [prt 0 x]
-  prtList _ (x:xs) = concatD [prt 0 x, doc (showString "|"), prt 0 xs]
-
-instance Print [TPolyIdent] where
-  prt = prtList
-
-instance Print [TypeCons] where
-  prt = prtList
-
-instance Print [Type] where
-  prt = prtList
-
-instance Print Type where
-  prt i e = case e of
-    TInt -> prPrec i 1 (concatD [doc (showString "Int")])
-    TBool -> prPrec i 1 (concatD [doc (showString "Bool")])
-    TList type_ -> prPrec i 1 (concatD [doc (showString "["), prt 0 type_, doc (showString "]")])
-    TAlgebraic tident -> prPrec i 1 (concatD [prt 0 tident])
-    TPoly tpolyident -> prPrec i 1 (concatD [prt 0 tpolyident])
-    TFun type_1 type_2 -> prPrec i 0 (concatD [prt 1 type_1, doc (showString "->"), prt 0 type_2])
-  prtList _ [] = concatD []
-  prtList _ (x:xs) = concatD [prt 0 x, prt 0 xs]
 

@@ -1,8 +1,6 @@
 comment "#" ;
 layout "with" ; -- for pattern matching
 
-token TIdent (upper (letter | digit)*) ;         -- algebraic data type ident
-token TPolyIdent ('\'' (lower)+ ) ;              -- polymorphic type ident
 token VIdent (lower (letter | digit | '_')*) ;   -- value ident
 
 entrypoints Line, Program ;
@@ -10,7 +8,6 @@ Prog.       Program ::= [Phrase] ;
 Line.       Line    ::= Phrase ";;" ;
 Value.      Phrase  ::= LetDef ;                 -- value-definition
 Expression. Phrase  ::= Expr ;                   -- expression
-TypeDecl.   Phrase  ::= TypeDef ;                -- type-definition
 
 terminator Phrase ";;" ;
 
@@ -22,23 +19,17 @@ LetLVI.     LetLVI   ::= LambdaVI ;
 separator nonempty LetLVI "" ;
 separator nonempty LetBind "also" ;
 
-PId.        Pattern5 ::= VIdent ;
-PInt.       Pattern5 ::= Integer ;
-PTrue.      Pattern5 ::= "True" ;
-PFalse.     Pattern5 ::= "False" ;
-PWildcard.  Pattern5 ::= "_" ;
-PListEmpty. Pattern5 ::= "[]" ;
-PTypeAlg.   Pattern5 ::= TIdent ;
-PList.      Pattern4 ::= "[" [Pattern4] "]" ;
-PTypeAlgRec.Pattern3 ::= "(" TIdent PNested ")";
-PListCons.  Pattern1 ::= Pattern5 "::" Pattern1 ;
+PId.        Pattern2 ::= VIdent ;
+PInt.       Pattern2 ::= Integer ;
+PTrue.      Pattern2 ::= "True" ;
+PFalse.     Pattern2 ::= "False" ;
+PWildcard.  Pattern2 ::= "_" ;
+PListEmpty. Pattern2 ::= "[]" ;
+PList.      Pattern1 ::= "[" [Pattern1] "]" ;
+PListCons.  Pattern  ::= Pattern2 "::" Pattern ;
 
-PAlgWild.   PNested  ::= "_" ;
-PAlgList.   PNested  ::= "(" [Pattern1] ")" ;
-
-separator nonempty Pattern4 "," ;
-separator Pattern1 "," ;
-coercions Pattern 5 ;
+separator nonempty Pattern1 "," ;
+coercions Pattern 2 ;
 
 -- Expressions --
 EId.        Expr9    ::= VIdent ;
@@ -46,7 +37,6 @@ EInt.       Expr9    ::= Integer ;
 ETrue.      Expr9    ::= "True" ;
 EFalse.     Expr9    ::= "False" ;
 EListEmpty. Expr9    ::= "[]" ;
-ETypeAlg.   Expr9    ::= TIdent ;
 EList.      Expr9    ::= "[" [Expr] "]" ;
 
 EApp.       Expr8    ::= Expr8 Expr9 ;
@@ -75,8 +65,6 @@ ELetIn.     Expr     ::= LetDef "in" Expr ;
 EMatch.     Expr     ::= "match" VIdent "with" "{" [Matching] "}" ;
 ELambda.    Expr     ::= "\\" [LambdaVI] "->" Expr ;
 
-ETypeCons.  Expr     ::= TIdent "of" "(" [Expr] ")" ;
-
 LambdaVId.  LambdaVI ::= VIdent ;
 WildVId.    LambdaVI ::= "_" ;
 
@@ -86,19 +74,4 @@ separator nonempty LambdaVI "," ;
 coercions Expr 9 ;
 
 MatchCase.  Matching ::= "case" Pattern "->" Expr ;
-
 ProcNameId. ProcName ::= VIdent ;
-
-TDef.       TypeDef  ::= "type" TIdent [TPolyIdent] "=" [TypeCons] ;
-TCons.      TypeCons ::= TIdent [Type] ;
-separator TPolyIdent "" ;
-separator nonempty TypeCons "|" ;
-separator Type "" ;
-
-TInt.       Type1    ::= "Int" ;
-TBool.      Type1    ::= "Bool" ;
-TList.      Type1    ::= "[" Type "]" ;
-TAlgebraic. Type1    ::= TIdent ;
-TPoly.      Type1    ::= TPolyIdent ;
-TFun.       Type     ::= Type1 "->" Type ;
-coercions Type 1 ;

@@ -5,8 +5,6 @@ module Lambda (
     UnOp(..),
     Value(..),
     ValMap,
-    ConsMap,
-    AlgTypeMap,
     Env(..),
     eval,
     evalCheck,
@@ -19,6 +17,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Except
 
+import Data.Maybe
 import qualified Data.Map as Map
 import qualified Data.List as List
 
@@ -35,28 +34,22 @@ fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 eval :: Env -> Expr -> Either String (Value, Type)
 eval env expr = do
     let schemes = _schemes env
-        algs    = _algtypes env
-        cons    = _constructors env
-    typed <- inferType schemes (algs, cons) expr
+    typed <- inferType schemes expr
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
 evalCheck :: Env -> Expr -> Type -> Either String (Value, Type)
 evalCheck env expr t = do
     let schemes = _schemes env
-        algs    = _algtypes env
-        cons    = _constructors env
-    typed <- checkType schemes (algs, cons) expr t
+    typed <- checkType schemes expr t
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
 typeCheck :: Env -> Expr -> Maybe Type -> Either String Type
 typeCheck env expr t = do
-    let tv = maybe (TVar "a") id t
+    let tv = fromMaybe (TVar "a") t
         schemes = _schemes env
-        algs    = _algtypes env
-        cons    = _constructors env
-    either throwError return $ checkType schemes (algs, cons) expr tv
+    either throwError return $ checkType schemes expr tv
 
 eval' :: Expr -> EvalReader
 eval' (Lit l) = case l of
@@ -92,7 +85,7 @@ eval' (Let n e1 e2) = do
 eval' (LetRec l e) = do
     env <- ask
     let vmap = _values env
-    prepVals <- return $ fixed env l
+    let prepVals = fixed env l
     let nmap = Map.fromList prepVals
     either throwError return $ ev (env {_values=Map.union nmap vmap})
     where
@@ -145,15 +138,6 @@ eval' (Cons e1 e2) = do
     eval2 <- eval' e2
     return $ VCons eval1 eval2
 
-eval' (AlgCons cname le) = do
-    env <- ask
-    let cmap = _constructors env
-    tname <- maybe (throwError $ "Unbound constructor " ++ cname) return $
-         Map.lookup cname cmap
-    args <- mapM eval' le
-    let arglen = length args
-    return $ VAlg cname tname args
-
 eval' (Typed e _) = eval' e
 
 data ApplyErr = ApplyFail String | MatchFail
@@ -176,7 +160,7 @@ apply (VClos (PVar x) e1 cenv) e2 env =
 apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
     let arityp = arity p
         aritye = arity e2
-    _ <- if arityp > aritye then (Left MatchFail) else return ()
+    _ <- when (arityp > aritye) (Left MatchFail)
     e1' <- unpackp p arityp
     let e2'  = unpackv e2 arityp
         venv = Map.fromList $ zip e1' e2'
@@ -192,8 +176,8 @@ apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
         unpackp _ _ = Left . ApplyFail $ 
             "List patterns that aren't variables are forbidden"
         unpackv v@(VCons v1 v2) len = 
-            if len > 1 then v1 : (unpackv v2 $ len - 1) else [v]
-        unpackv (VNil) _ = [VNil]
+            if len > 1 then v1 : unpackv v2 (len - 1) else [v]
+        unpackv VNil _ = [VNil]
         
 apply (VFixed fn l cenv) e2 env = case found of
     (_, Lam (PConst k) e1):_ -> do
@@ -204,7 +188,7 @@ apply (VFixed fn l cenv) e2 env = case found of
                                     (VNil, VNil) -> True
                                     _ -> False
         if cond then either (Left . ApplyFail) return .
-            runExcept $ runReaderT (eval' e1) (nenv $ kmap) else Left MatchFail
+            runExcept $ runReaderT (eval' e1) (nenv kmap) else Left MatchFail
     (_, Lam (PVar x) e1):_ -> either (Left . ApplyFail) return .
         runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
     (_, Lam (PCons _ _) _):_ -> 

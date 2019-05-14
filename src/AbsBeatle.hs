@@ -7,9 +7,6 @@ module AbsBeatle where
 
 
 
-newtype TIdent = TIdent String deriving (Eq, Ord, Show, Read)
-newtype TPolyIdent = TPolyIdent String
-  deriving (Eq, Ord, Show, Read)
 newtype VIdent = VIdent String deriving (Eq, Ord, Show, Read)
 data Program = Prog [Phrase]
   deriving (Eq, Ord, Show, Read)
@@ -17,7 +14,7 @@ data Program = Prog [Phrase]
 data Line = Line Phrase
   deriving (Eq, Ord, Show, Read)
 
-data Phrase = Value LetDef | Expression Expr | TypeDecl TypeDef
+data Phrase = Value LetDef | Expression Expr
   deriving (Eq, Ord, Show, Read)
 
 data LetDef = Let [LetBind] | LetRec [LetBind]
@@ -30,9 +27,6 @@ data LetBind
 data LetLVI = LetLVI LambdaVI
   deriving (Eq, Ord, Show, Read)
 
-data PNested = PAlgWild | PAlgList [Pattern]
-  deriving (Eq, Ord, Show, Read)
-
 data Pattern
     = PId VIdent
     | PInt Integer
@@ -40,9 +34,7 @@ data Pattern
     | PFalse
     | PWildcard
     | PListEmpty
-    | PTypeAlg TIdent
     | PList [Pattern]
-    | PTypeAlgRec TIdent PNested
     | PListCons Pattern Pattern
   deriving (Eq, Ord, Show, Read)
 
@@ -52,7 +44,6 @@ data Expr
     | ETrue
     | EFalse
     | EListEmpty
-    | ETypeAlg TIdent
     | EList [Expr]
     | EApp Expr Expr
     | ENeg Expr
@@ -75,7 +66,6 @@ data Expr
     | ELetIn LetDef Expr
     | EMatch VIdent [Matching]
     | ELambda [LambdaVI] Expr
-    | ETypeCons TIdent [Expr]
   deriving (Eq, Ord, Show, Read)
 
 data LambdaVI = LambdaVId VIdent | WildVId
@@ -85,20 +75,5 @@ data Matching = MatchCase Pattern Expr
   deriving (Eq, Ord, Show, Read)
 
 data ProcName = ProcNameId VIdent
-  deriving (Eq, Ord, Show, Read)
-
-data TypeDef = TDef TIdent [TPolyIdent] [TypeCons]
-  deriving (Eq, Ord, Show, Read)
-
-data TypeCons = TCons TIdent [Type]
-  deriving (Eq, Ord, Show, Read)
-
-data Type
-    = TInt
-    | TBool
-    | TList Type
-    | TAlgebraic TIdent
-    | TPoly TPolyIdent
-    | TFun Type Type
   deriving (Eq, Ord, Show, Read)
 
