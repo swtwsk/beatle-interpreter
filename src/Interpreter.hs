@@ -38,20 +38,20 @@ interpretPhrase (Value letdef) = do
     env <- get
     let vmap = _values env
         tld  = translateLetDef letdef
+        sm   = _schemes env
     m <- case tld of
         Fun list -> either throwError (return . map extractVar) $ 
             seqPair $ map (ev env) list
         Rec list -> do
-            let sm = _schemes env
             ty <- either throwError return $ T.inferTypeRec sm list
             return $ zipType (fixed env list) ty
             where
                     zipType ((n, v):tv) t = (n, v, t) : zipType tv t
                     zipType [] _ = []
     let m' = map (\(n, v, _) -> (n, v)) m
-    let t' = map (\(n, _, t) -> (n, T.Scheme [] t)) m
+        t' = map (\(n, _, t) -> (n, T.generalize (T.GammaEnv sm) t)) m
     put $ env { _values = Map.union (Map.fromList m') vmap
-              , _schemes  = Map.union (Map.fromList t') (_schemes env) }
+              , _schemes  = Map.union (Map.fromList t') sm }
     return $ map (\(n, v, t) -> (pure n, v, t)) m
     where
         ev env (name, expr) = (name, eval env expr)

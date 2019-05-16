@@ -34,14 +34,14 @@ class Types a where
 instance Types Type where
     ftv TInt         = Set.empty
     ftv TBool        = Set.empty
-    ftv (TFun t1 t2)  = Set.union (ftv t1) (ftv t2)
-    ftv (TVar n)      = Set.singleton n
-    ftv (TList t)     = Set.empty
+    ftv (TFun t1 t2) = Set.union (ftv t1) (ftv t2)
+    ftv (TVar n)     = Set.singleton n
+    ftv (TList t)    = ftv t
 
-    apply s v@(TVar n)    = fromMaybe v $ Map.lookup n s
-    apply s (TFun t1 t2)  = TFun (apply s t1) (apply s t2)
-    apply s (TList t)     = TList (apply s t)
-    apply s t             = t
+    apply s v@(TVar n)   = fromMaybe v $ Map.lookup n s
+    apply s (TFun t1 t2) = TFun (apply s t1) (apply s t2)
+    apply s (TList t)    = TList (apply s t)
+    apply s t            = t
 
 instance Types Scheme where
     ftv (Scheme vars t)     = ftv t `Set.difference` Set.fromList vars
@@ -58,10 +58,11 @@ emptySubst = Map.empty
 composeSubst :: Subst -> Subst -> Subst
 -- Substitute every bound variable from s2 with proper s1 substitution
 -- and concatenate rest of s1 to it
-composeSubst s1 s2 = Map.map (apply s1) s2 `Map.union` s1
+composeSubst s1 s2 = (Map.map (apply s1) s2) `Map.union` s1
 
 type SchemeMap = Map.Map String Scheme
-newtype GammaEnv = GammaEnv SchemeMap deriving (Show)
+newtype GammaEnv = GammaEnv SchemeMap
+
 remove :: GammaEnv -> String -> GammaEnv
 remove (GammaEnv env) var = GammaEnv $ Map.delete var env
 
@@ -150,15 +151,12 @@ instance TypeCheck Expr where
         s3 <- unify (apply s2 t1) (TFun t2 tv)
         return (s3 `composeSubst` s2 `composeSubst` s1, apply s3 tv)
     ti env (Let x e1 e2) = do
-        tv <- tcmFresh
         (s1, t1) <- ti env e1
-        s1' <- unify t1 tv
-        let s1'' = s1' `composeSubst` s1
         let GammaEnv env' = remove env x
-            t' = generalize (apply s1'' env) t1
+            t' = generalize (apply s1 env) t1
             env'' = GammaEnv (Map.insert x t' env')
-        (s2, t2) <- ti (apply s1'' env'') e2
-        return (s1'' `composeSubst` s2, t2)
+        (s2, t2) <- ti (apply s1 env'') e2
+        return (s1 `composeSubst` s2, t2)
     ti env (LetRec l e) = do
         (s1, t1, env') <- typeRec env l
         let xs = map fst l
