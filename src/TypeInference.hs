@@ -76,8 +76,7 @@ generalize :: GammaEnv -> Type -> Scheme
 generalize env t = Scheme vars t
     where vars = Set.toList (Set.difference (ftv t) (ftv env))
 
-data TcState = TcState { _supply :: String
-                       , _subst  :: Subst } deriving (Show)
+data TcState = TcState { _supply :: String } deriving (Show)
 
 type TCM a = StateT TcState (Except InterpreterError) a
 
@@ -91,8 +90,7 @@ tcmFresh = do
 
 runTCM :: TCM a -> Either InterpreterError (a, TcState)
 runTCM t = runExcept $ runStateT t initState
-    where initState = TcState { _supply = "\'a"
-                              , _subst = Map.empty }
+    where initState = TcState { _supply = "\'a" }
 
 -- replace all bound type variables in a type scheme with fresh type variables
 instantiate :: Scheme -> TCM Type

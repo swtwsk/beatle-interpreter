@@ -19,15 +19,12 @@ import Control.Monad.Except
 
 import Data.Maybe
 import qualified Data.Map as Map
-import qualified Data.List as List
 
 import Expr
 import Errors
 import TypeInference
-import Utils
 import Values
 
-type TypeReader = ReaderT Env (Except InterpreterError) Type
 type EvalReader = ReaderT Env (Except InterpreterError) Value
 
 fixed :: Env -> [(Name, Expr)] -> [(Name, Value)]
