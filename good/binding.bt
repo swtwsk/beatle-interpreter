@@ -1,0 +1,13 @@
+# statyczne wiazanie przy dowolnym zagniezdzeniu
+
+let f x =
+  let f x =
+    let f x =
+      let f x = x + 1
+      also x = 3
+      in f x          # wywoluje (3 + 1)
+    in f 0 - x        # f 0 - x = 4 - x
+  in f 2              # pomija otrzymany x i zwraca 4 - 2
+;;
+
+f 0;;

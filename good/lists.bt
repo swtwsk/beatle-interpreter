@@ -1,0 +1,57 @@
+# Insertion sort na liscie
+letrec insert elem l = match l with
+  case h::t -> if elem < h then elem :: h :: t
+               else h :: insert elem t
+  case [] -> [elem]
+;;
+letrec sort l = match l with
+  case [] -> []
+  case h::t -> insert h (sort t)
+;;
+
+sort [2, 1, 5, -1];;
+sort [0, 1, 2, 3, 4];;
+
+# foldl / foldr
+letrec foldl f acc l = match l with
+  case h::t -> foldl f (f acc h) t
+  case [] -> acc
+;;
+letrec foldr f l acc = match l with
+  case h::t -> f h (foldr f t acc)
+  case [] -> acc
+;;
+
+let l = [1, 2, 3];;
+foldl (\acc, el -> el :: acc) [] l;; # [3, 2, 1]
+foldr (\el, acc -> el :: acc) [] l;; # [1, 2, 3]
+
+# listy funkcji
+letrec use l x = match l with
+  case h::t -> (h x) :: (use t x)
+  case [] -> []
+;;
+use [\x -> x, \x -> x * 2, \x -> x * 3] 3;;
+
+# listy zagniezdzone
+letrec append l1 l2 = match l1 with
+  case [] -> l2
+  case h::t -> h::(append t l2)
+;;
+
+let concat l = foldr (\el, acc -> append el acc) l [];;
+
+append [1,2,3] [4,5,6];;
+concat [[1,2], [3,4], [5,6]];;
+concat (concat [[[1,2], [3,4]], [[5],[6], []]]);;
+
+# szerszy pattern matching
+let removeSnd l = match l with
+  case h::_::t -> h::t
+  case h::[] -> [h]
+  case [] -> []
+;;
+
+removeSnd [1,2,3,4];;
+removeSnd [[1,2], [3,4], [5,6]];;
+removeSnd [1];;

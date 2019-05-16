@@ -172,6 +172,7 @@ apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
         unpackp (PCons (PVar p1) p2) len = if len <= 1 then return [p1]
             else do { p2' <- unpackp p2 (len - 1); return $ p1 : p2'}
         unpackp (PVar p1) _ = return [p1]
+        unpackp (PConst LNil) _ = return []
         unpackp _ _ = Left ForbiddenListPattern
         unpackv v@(VCons v1 v2) len = 
             if len > 1 then v1 : unpackv v2 (len - 1) else [v]

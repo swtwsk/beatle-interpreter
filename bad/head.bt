@@ -1,0 +1,5 @@
+let head l = match l with
+  case h::t -> h
+;;
+
+head [];;

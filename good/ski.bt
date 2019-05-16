@@ -1,0 +1,9 @@
+# kombinatory S, K i I
+let s = \f, g, x -> f x (g x);;
+let k = \x, y -> x;;
+let i = \x -> x;;
+
+let skk = s k k;; # SKK = I
+
+skk 1;;
+skk True;;

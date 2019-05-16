@@ -1,0 +1,24 @@
+# Najpierw zdefiniujmy dwie ciekawe funkcje:
+# map na liscie oraz zlozenie funkcji
+letrec map f l = match l with
+  case h::t -> (f h) :: (map f t)
+  case [] -> []
+;;
+let compose f g = \x -> f (g x);;
+
+# Stworzmy liste funkcji anonimowych
+let fs = [\x -> x + 1, \x -> x - 1];;
+
+# Zlozmy ja z funkcja porownujaca liczbe
+let nfs = map (compose (\x -> x == 0)) fs;;
+
+# I teraz zaaplikujmy ja do jedynki
+map (\f -> f 1) nfs;;
+
+
+# Domkniecia i funkcje wieloargumentowe
+let f x y = let f x = x + 1 in (f x) + y;;
+let fWith3 = f 3;;
+let f x = x * 3;;
+fWith3 4;; # 8
+f 4;; # 12

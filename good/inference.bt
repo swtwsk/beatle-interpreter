@@ -1,0 +1,10 @@
+# Polimorfizm i inferencja typow HM
+let id x = x;;  # typ 'a -> 'a
+id id;;
+id id 1;;
+id id True;;
+
+# Sprawdzanie rownosci
+let eq x y = x == y;;  # jeszcze polimorficzne
+let eq1 = eq 1;; # juz konkretne
+eq1 1;;
