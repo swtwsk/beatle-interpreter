@@ -15,19 +15,19 @@ import Lambda
 import qualified Expr as E
 import qualified TypeInference as T
 
-type InterRes = [(Maybe Name, Value, E.Type)]
+type Result = [(Maybe Name, Value, E.Type)]
 
 type IState = ExceptT InterpreterError (StateT Env (InputT IO))
 
 data Fun = Fun [(Name, E.Expr)] | Rec [(Name, E.Expr)]
 
-interpretLine :: Line -> IState InterRes
+interpretLine :: Line -> IState Result
 interpretLine (Line phr) = interpretPhrase phr
 
--- interpretProg :: Program -> [Result]
--- interpretProg (Prog phr) = map interpretPhrase phr
+interpretProg :: Program -> IState [Result]
+interpretProg (Prog phr) = mapM interpretPhrase phr
 
-interpretPhrase :: Phrase -> IState InterRes
+interpretPhrase :: Phrase -> IState Result
 interpretPhrase (Expression e) = do
     env <- get
     let ev = eval env $ translateExpr e
