@@ -10,15 +10,14 @@ import qualified Data.Map as Map
 import AbsBeatle
 import Utils
 
+import Errors
 import Lambda
 import qualified Expr as E
+import qualified TypeInference as T
 
 type InterRes = [(Maybe Name, Value, E.Type)]
 
-type TransRes = Either String
-type Result = TransRes InterRes
-
-type IState = ExceptT String (StateT Env (InputT IO))
+type IState = ExceptT InterpreterError (StateT Env (InputT IO))
 
 data Fun = Fun [(Name, E.Expr)] | Rec [(Name, E.Expr)]
 
@@ -44,13 +43,13 @@ interpretPhrase (Value letdef) = do
             seqPair $ map (ev env) list
         Rec list -> do
             let sm = _schemes env
-            ty <- either throwError return $ E.inferTypeRec sm list
+            ty <- either throwError return $ T.inferTypeRec sm list
             return $ zipType (fixed env list) ty
             where
                     zipType ((n, v):tv) t = (n, v, t) : zipType tv t
                     zipType [] _ = []
     let m' = map (\(n, v, _) -> (n, v)) m
-    let t' = map (\(n, _, t) -> (n, E.Scheme [] t)) m
+    let t' = map (\(n, _, t) -> (n, T.Scheme [] t)) m
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
     return $ map (\(n, v, t) -> (pure n, v, t)) m

@@ -19,14 +19,16 @@ extra-source-files:
 
 library
   exposed-modules:
-      ParBeatle
       AbsBeatle
       ErrM
+      Errors
       Expr
+      Interpreter
       LayoutBeatle
       LexBeatle
-      Interpreter
       Lambda
+      ParBeatle
+      TypeInference
       Utils
       Values
   other-modules:

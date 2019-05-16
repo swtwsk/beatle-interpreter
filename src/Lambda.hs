@@ -22,30 +22,32 @@ import qualified Data.Map as Map
 import qualified Data.List as List
 
 import Expr
+import Errors
+import TypeInference
 import Utils
 import Values
 
-type TypeReader = ReaderT Env (Except String) Type
-type EvalReader = ReaderT Env (Except String) Value
+type TypeReader = ReaderT Env (Except InterpreterError) Type
+type EvalReader = ReaderT Env (Except InterpreterError) Value
 
 fixed :: Env -> [(Name, Expr)] -> [(Name, Value)]
 fixed env l = map (\(n, _) -> (n, VFixed n l env)) l
 
-eval :: Env -> Expr -> Either String (Value, Type)
+eval :: Env -> Expr -> Either InterpreterError (Value, Type)
 eval env expr = do
     let schemes = _schemes env
     typed <- inferType schemes expr
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
-evalCheck :: Env -> Expr -> Type -> Either String (Value, Type)
+evalCheck :: Env -> Expr -> Type -> Either InterpreterError (Value, Type)
 evalCheck env expr t = do
     let schemes = _schemes env
     typed <- checkType schemes expr t
     evaled <- runExcept $ runReaderT (eval' expr) env
     return (evaled, typed)
 
-typeCheck :: Env -> Expr -> Maybe Type -> Either String Type
+typeCheck :: Env -> Expr -> Maybe Type -> Either InterpreterError Type
 typeCheck env expr t = do
     let tv = fromMaybe (TVar "a") t
         schemes = _schemes env
@@ -60,7 +62,7 @@ eval' (Lit l) = case l of
 eval' (Var var) = do
     env <- ask
     let vmap = _values env
-    maybe (throwError $ "Unbound value " ++ var) return (Map.lookup var vmap)
+    maybe (throwError . EE $ EUnboundVal var) return $ Map.lookup var vmap
 
 eval' (Lam n e) = do
     env <- ask
@@ -74,12 +76,12 @@ eval' (Case var l) = do
 eval' (Let n e1 e2) = do
     env <- ask
     let vmap = _values env
-    eval1 <- either fail return $ eval env e1
+    eval1 <- either throwError return $ eval env e1
     let (eval1', _) = eval1
     let nmap = Map.insert n eval1' vmap
     either throwError return $ ev (Map.union nmap vmap) env
     where
-        ev :: ValMap -> Env -> Either String Value
+        ev :: ValMap -> Env -> Either InterpreterError Value
         ev vmap env = runExcept (runReaderT (eval' e2) (env {_values=vmap}))
 
 eval' (LetRec l e) = do
@@ -89,7 +91,7 @@ eval' (LetRec l e) = do
     let nmap = Map.fromList prepVals
     either throwError return $ ev (env {_values=Map.union nmap vmap})
     where
-        ev :: Env -> Either String Value
+        ev :: Env -> Either InterpreterError Value
         ev env = runExcept $ runReaderT (eval' e) env
 
 eval' (App e1 e2) = do
@@ -102,36 +104,35 @@ eval' (If cond e1 e2) = do
     c <- eval' cond
     case c of
         VBool b -> if b then eval' e1 else eval' e2
-        _ -> throwError "Unexpected error"
+        _ -> throwError UnexpectedError
 
 eval' (BinOp op e1 e2) = do
     eval1 <- eval' e1
     eval2 <- eval' e2
     either throwError return $ binOp eval1 eval2 op
     where
-        binOp :: Value -> Value -> BinOp -> Either String Value
+        binOp :: Value -> Value -> BinOp -> Either InterpreterError Value
         binOp (VInt a) (VInt b) OpAdd = return . VInt $ a + b
         binOp (VInt a) (VInt b) OpMul = return . VInt $ a * b
         binOp (VInt a) (VInt b) OpSub = return . VInt $ a - b
-        binOp (VInt a) (VInt 0) OpDiv = throwError "Cannot divide by zero"
+        binOp (VInt a) (VInt 0) OpDiv = throwError $ EE EDivisionByZero
         binOp (VInt a) (VInt b) OpDiv = return . VInt $ a `div` b
         binOp (VBool a) (VBool b) OpAnd = return . VBool $ a && b
         binOp (VBool a) (VBool b) OpOr  = return . VBool $ a || b
         binOp (VBool a) (VBool b) OpEq  = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpEq    = return . VBool $ a == b
         binOp (VInt a) (VInt b) OpLT    = return . VBool $ a < b
-        binOp _ _ OpEq  = 
-            throwError "Cannot test equality in types other than int and bool"
-        binOp _ _ _     = throwError "Unexpected error"
+        binOp _ _ OpEq  = throwError $ EE EEquality
+        binOp _ _ _     = throwError UnexpectedError
 
 eval' (UnOp op e) = do
     ev <- eval' e
     either throwError return $ unOp ev op
     where 
-        unOp :: Value -> UnOp -> Either String Value
+        unOp :: Value -> UnOp -> Either InterpreterError Value
         unOp (VInt v) OpNeg = return . VInt $ (-v)
         unOp (VBool b) OpNot = return . VBool $ not b
-        unOp _ _ = throwError "Unexpected error"
+        unOp _ _ = throwError UnexpectedError
 
 eval' (Cons e1 e2) = do
     eval1 <- eval' e1
@@ -139,8 +140,6 @@ eval' (Cons e1 e2) = do
     return $ VCons eval1 eval2
 
 eval' (Typed e _) = eval' e
-
-data ApplyErr = ApplyFail String | MatchFail
 
 apply :: Value -> Value -> Env -> Either ApplyErr Value
 apply (VClos (PConst k) e1 cenv) e2 _ = do
@@ -173,8 +172,7 @@ apply (VClos p@(PCons p1 p2) e1 cenv) e2 env = do
         unpackp (PCons (PVar p1) p2) len = if len <= 1 then return [p1]
             else do { p2' <- unpackp p2 (len - 1); return $ p1 : p2'}
         unpackp (PVar p1) _ = return [p1]
-        unpackp _ _ = Left . ApplyFail $ 
-            "List patterns that aren't variables are forbidden"
+        unpackp _ _ = Left ForbiddenListPattern
         unpackv v@(VCons v1 v2) len = 
             if len > 1 then v1 : unpackv v2 (len - 1) else [v]
         unpackv VNil _ = [VNil]
@@ -191,9 +189,7 @@ apply (VFixed fn l cenv) e2 env = case found of
             runExcept $ runReaderT (eval' e1) (nenv kmap) else Left MatchFail
     (_, Lam (PVar x) e1):_ -> either (Left . ApplyFail) return .
         runExcept $ runReaderT (eval' e1) (nenv $ nmap x)
-    (_, Lam (PCons _ _) _):_ -> 
-        Left $ ApplyFail "Fixed PCons: unimplemented"
-    _ -> Left $ ApplyFail "Expression is not a function; it cannot be applied"
+    _ -> Left ExpressionNotAFunction
     where
         found = filter (\(n, _) -> n == fn) l
         l' = map (\(n, _) -> (n, VFixed n l cenv)) l
@@ -209,9 +205,7 @@ apply (VCase var l cenv) e2 env = workL l
             err@(Left _) -> err
             val@(Right _) -> val
         workL [] = Left MatchFail
-apply _ _ _ = 
-    Left $ ApplyFail "Expression is not a function; it cannot be applied"
+apply _ _ _ = Left ExpressionNotAFunction
 
 readApplyErr :: ApplyErr -> EvalReader
-readApplyErr (ApplyFail err) = throwError err
-readApplyErr MatchFail = throwError "Non-exhaustive pattern match"
+readApplyErr ae = throwError . EE $ EApplyErr ae

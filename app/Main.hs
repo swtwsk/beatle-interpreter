@@ -1,19 +1,19 @@
 module Main where
 
+import Control.Monad (unless)
+import Control.Monad.IO.Class
+import Control.Monad.State
+import Control.Monad.Except
+import Data.Maybe (fromMaybe)
+import System.Console.Haskeline
+
 import LexBeatle
 import ParBeatle
 import LayoutBeatle
 import Interpreter
 import Values
+import Errors
 import ErrM
-
-import Control.Monad (unless)
-import Control.Monad.IO.Class
-import Control.Monad.State
-import Control.Monad.Except
-import Data.List (intercalate)
-import Data.Maybe (fromMaybe)
-import System.Console.Haskeline
 
 title :: [String]
 title = 
@@ -54,8 +54,8 @@ run env = runInputT defaultSettings (runStateT (runExceptT loop) env)
                 Just ":q" -> lift $ lift $ outputStrLn "Goodbye."
                 Just input -> process input >> loop
 
-rerun :: (Env -> IO ()) -> (Either String b, Env) -> IO ()
-rerun f (Left err, env) = putStrLn ("Fatal error: " ++ err) >> f env
+rerun :: (Env -> IO ()) -> (Either InterpreterError b, Env) -> IO ()
+rerun f (Left err, env) = print err >> f env
 rerun _ (Right _, _) = return ()
 
 main :: IO ()

@@ -1,6 +1,7 @@
 module Values where
 
 import Expr
+import TypeInference
 
 import qualified Data.Map as Map
 import Data.List (intercalate)
