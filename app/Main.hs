@@ -29,9 +29,8 @@ title =
 myLLexer :: String -> [Token]
 myLLexer = resolveLayout True . myLexer
 
-eitherFunc :: Either String InterRes -> IState [String]
-eitherFunc (Left err) = return [err]
-eitherFunc (Right l) = return $ map showVal l
+showFunc :: InterRes -> IState [String]
+showFunc l = return $ map showVal l
     where
         showVal (name, val, t) = fromMaybe "-" name ++ " : " ++ show t 
             ++ " = " ++ show val
@@ -41,10 +40,11 @@ process line = do
     let res = pLine (myLLexer line)
     case res of
         (Bad s) -> unless (null line) $ liftIO $ putStrLn s
-        (Ok s) -> (liftIO . putStr . unlines) =<< eitherFunc =<< interpretLine s
+        (Ok s) -> (liftIO . putStr . unlines) =<< showFunc =<< interpretLine s
         
-run :: IO ()
-run = runInputT defaultSettings (runExceptT $ runStateT loop emptyEnv) >>= rerun run
+run :: Env -> IO ()
+run env = runInputT defaultSettings (runStateT (runExceptT loop) env) 
+    >>= rerun run
     where
         loop :: IState ()
         loop = do
@@ -54,10 +54,9 @@ run = runInputT defaultSettings (runExceptT $ runStateT loop emptyEnv) >>= rerun
                 Just ":q" -> lift $ lift $ outputStrLn "Goodbye."
                 Just input -> process input >> loop
 
-rerun :: IO () -> Either String b -> IO ()
-rerun f (Left err) = putStrLn ("Fatal error: " ++ err) 
-    >> putStrLn "Restarting interpreter" >> f
-rerun _ (Right _) = return ()
+rerun :: (Env -> IO ()) -> (Either String b, Env) -> IO ()
+rerun f (Left err, env) = putStrLn ("Fatal error: " ++ err) >> f env
+rerun _ (Right _, _) = return ()
 
 main :: IO ()
-main = (putStr . unlines $ title) >> run
+main = (putStr . unlines $ title) >> run emptyEnv

@@ -5,5 +5,5 @@ seqPair = sequence . seq'
     where
         seq' l = case l of
             (a, Left b):t -> [Left b]
-            (a, Right b):t -> Right (a, b) : (seq' t)
+            (a, Right b):t -> Right (a, b) : seq' t
             [] -> []

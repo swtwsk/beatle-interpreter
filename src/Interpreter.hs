@@ -18,200 +18,181 @@ type InterRes = [(Maybe Name, Value, E.Type)]
 type TransRes = Either String
 type Result = TransRes InterRes
 
-type IState = StateT Env (ExceptT String (InputT IO))
+type IState = ExceptT String (StateT Env (InputT IO))
 
 data Fun = Fun [(Name, E.Expr)] | Rec [(Name, E.Expr)]
 
-interpretLine :: Line -> IState Result
+interpretLine :: Line -> IState InterRes
 interpretLine (Line phr) = interpretPhrase phr
 
 -- interpretProg :: Program -> [Result]
 -- interpretProg (Prog phr) = map interpretPhrase phr
 
-interpretPhrase :: Phrase -> IState Result
+interpretPhrase :: Phrase -> IState InterRes
 interpretPhrase (Expression e) = do
     env <- get
-    let ev = either Left (eval env) $ translateExpr e
-    return $ either Left (\(v, t) -> return [(Nothing, v, t)]) ev
+    let ev = eval env $ translateExpr e
+    case ev of
+        Left err -> throwError err
+        Right (v, t) -> return [(Nothing, v, t)]
 interpretPhrase (Value letdef) = do
     env <- get
     let vmap = _values env
-    tld <- either throwError return $ translateLetDef letdef
+        tld  = translateLetDef letdef
     m <- case tld of
-        Fun list -> either throwError return $ seqPair $ map (ev env) list
+        Fun list -> either throwError (return . map extractVar) $ 
+            seqPair $ map (ev env) list
         Rec list -> do
-            let sm   = _schemes env
+            let sm = _schemes env
             ty <- either throwError return $ E.inferTypeRec sm list
             return $ zipType (fixed env list) ty
             where
-                zipType ((n, v):tv) t = (n, (v, t)) : zipType tv t
-                zipType [] _ = []
-    ms <- mapM (either throwError return . extractVar) m
-    let m' = map (\(n, v, _) -> (n, v)) ms
-    let t' = map (\(n, _, t) -> (n, E.Scheme [] t)) ms
+                    zipType ((n, v):tv) t = (n, v, t) : zipType tv t
+                    zipType [] _ = []
+    let m' = map (\(n, v, _) -> (n, v)) m
+    let t' = map (\(n, _, t) -> (n, E.Scheme [] t)) m
     put $ env { _values = Map.union (Map.fromList m') vmap
               , _schemes  = Map.union (Map.fromList t') (_schemes env) }
-    let extr = map (\(n, v, t) -> (pure n, v, t)) ms
-    return . pure $ extr
+    return $ map (\(n, v, t) -> (pure n, v, t)) m
     where
         ev env (name, expr) = (name, eval env expr)
-        extractVar (n, (v, t)) = pure (n, v, t)
+        extractVar (n, (v, t)) = (n, v, t)
 
-translateExpr :: Expr -> TransRes E.Expr
-translateExpr (EId (VIdent n)) = pure $ E.Var n
-translateExpr (EInt i) = pure . E.Lit $ E.LInt i
-translateExpr ETrue = pure . E.Lit $ E.LBool True
-translateExpr EFalse = pure . E.Lit $ E.LBool False
-translateExpr EListEmpty = pure . E.Lit $ E.LNil
-translateExpr (EApp e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.App te1 te2
-translateExpr (ENeg e) = do
-    te <- translateExpr e
-    pure $ E.UnOp E.OpNeg te
-translateExpr (ENot e) = do
-    te <- translateExpr e
-    pure $ E.UnOp E.OpNot te
-translateExpr (EMul e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpMul te1 te2
-translateExpr (EDiv e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpDiv te1 te2
-translateExpr (EAdd e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpAdd te1 te2
-translateExpr (ESub e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpSub te1 te2
-translateExpr (EMod e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ 
-        E.BinOp E.OpSub te1 (E.BinOp E.OpMul te2 (E.BinOp E.OpDiv te1 te2))
-translateExpr (EListCons e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.Cons te1 te2
-translateExpr (ELTH e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpLT te1 te2
-translateExpr (ELE e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpOr (E.BinOp E.OpLT te1 te2) (E.BinOp E.OpEq te1 te2)
-translateExpr (EGTH e1 e2) = do
-    le <- translateExpr (ELE e1 e2)
-    pure $ E.UnOp E.OpNot le
-translateExpr (EGE e1 e2) = do
-    less <- translateExpr (ELTH e1 e2)
-    pure $ E.UnOp E.OpNot less
-translateExpr (EEQU e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpEq te1 te2
-translateExpr (ENE e1 e2) = do
-    eq <- translateExpr (EEQU e1 e2)
-    pure $ E.UnOp E.OpNot eq
-translateExpr (EAnd e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpAnd te1 te2
-translateExpr (EOr e1 e2) = do
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.BinOp E.OpOr te1 te2
-translateExpr (ECond cond e1 e2) = do
-    tc <- translateExpr cond
-    te1 <- translateExpr e1
-    te2 <- translateExpr e2
-    pure $ E.If tc te1 te2
-
-translateExpr (ELetIn letdef e) = do
-    tl <- translateLetDef letdef
-    te <- translateExpr e
-    case tl of 
-        Fun list -> pure $ transLambda list te
-        Rec list -> pure $ E.LetRec list te
+translateExpr :: Expr -> E.Expr
+translateExpr (EId (VIdent n)) = E.Var n
+translateExpr (EInt i) = E.Lit $ E.LInt i
+translateExpr ETrue = E.Lit $ E.LBool True
+translateExpr EFalse = E.Lit $ E.LBool False
+translateExpr EListEmpty = E.Lit E.LNil
+translateExpr (EApp e1 e2) = E.App te1 te2
     where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ENeg e) = E.UnOp E.OpNeg $ translateExpr e
+translateExpr (ENot e) = E.UnOp E.OpNot $ translateExpr e
+translateExpr (EMul e1 e2) = E.BinOp E.OpMul te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (EDiv e1 e2) = E.BinOp E.OpDiv te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (EAdd e1 e2) = E.BinOp E.OpAdd te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ESub e1 e2) = E.BinOp E.OpSub te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (EMod e1 e2) =
+    E.BinOp E.OpSub te1 (E.BinOp E.OpMul te2 (E.BinOp E.OpDiv te1 te2))
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2        
+translateExpr (EListCons e1 e2) = E.Cons te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ELTH e1 e2) = E.BinOp E.OpLT te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ELE e1 e2) = 
+    E.BinOp E.OpOr (E.BinOp E.OpLT te1 te2) (E.BinOp E.OpEq te1 te2)
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (EGTH e1 e2) = E.UnOp E.OpNot $ translateExpr (ELE e1 e2)
+translateExpr (EGE e1 e2) = E.UnOp E.OpNot $ translateExpr (ELTH e1 e2)
+translateExpr (EEQU e1 e2) = E.BinOp E.OpEq te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ENE e1 e2) = E.UnOp E.OpNot $ translateExpr (EEQU e1 e2)
+translateExpr (EAnd e1 e2) = E.BinOp E.OpAnd te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (EOr e1 e2) = E.BinOp E.OpOr te1 te2
+    where
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ECond cond e1 e2) = E.If tc te1 te2
+    where
+        tc  = translateExpr cond
+        te1 = translateExpr e1
+        te2 = translateExpr e2
+translateExpr (ELetIn letdef e) = case tl of 
+    Fun list -> transLambda list te
+    Rec list -> E.LetRec list te
+    where
+        tl = translateLetDef letdef
+        te = translateExpr e
         transLambda l e = case l of
             (n, fe):t -> E.Let n fe (transLambda t e)
             [] -> e
 
-translateExpr (EMatch (VIdent n) matchList) = do
-    ml <- mapM translateMatching matchList
-    pure $ E.Case n ml
+translateExpr (EMatch (VIdent n) matchList) = 
+    E.Case n $ map translateMatching matchList
 
-translateExpr (ELambda vlist e) = do
-    te <- translateExpr e
-    pure $ transLambda vlist te
+translateExpr (ELambda vlist e) = transLambda vlist $ translateExpr e
     where 
         transLambda l e = case l of
             h:t -> E.Lam (E.PVar $ translateLambdaVI h) (transLambda t e)
-            [] -> e
-translateExpr (EList elist) = do
-    tlist <- mapM translateExpr elist
-    pure . trans $ tlist
+            []  -> e
+translateExpr (EList elist) = trans $ map translateExpr elist
     where 
         trans l = case l of
             h:t -> E.Cons h (trans t)
-            [] -> E.Lit E.LNil
+            []  -> E.Lit E.LNil
 
-translateLetDef :: LetDef -> TransRes Fun
+translateLetDef :: LetDef -> Fun
 translateLetDef ld = case ld of
-    Let letbinds -> 
-        either Left (pure . Fun) $ mapM translateLetBind letbinds
-    LetRec letbinds -> 
-        either Left (pure . Rec) $ mapM translateLetBind letbinds
+    Let letbinds -> Fun $ map translateLetBind letbinds
+    LetRec letbinds -> Rec $ map translateLetBind letbinds
 
-translateLetBind :: LetBind -> TransRes (Name, E.Expr)
-translateLetBind (ConstBind lvi e) = do
-    n <- translateLetLVI lvi
-    te <- translateExpr e
-    pure (n, te)
-translateLetBind (ProcBind (ProcNameId (VIdent proc)) il e) = do
-    til <- mapM translateLetLVI il
-    te <- translateExpr e
-    pure (proc, transLambda til te)
+translateLetBind :: LetBind -> (Name, E.Expr)
+translateLetBind (ConstBind lvi e) = (n, te)
     where
+        n = translateLetLVI lvi
+        te = translateExpr e
+translateLetBind (ProcBind (ProcNameId (VIdent proc)) il e) = 
+    (proc, transLambda til te)
+    where
+        til = map translateLetLVI il
+        te = translateExpr e
         transLambda l e = case l of
             n:t  -> E.Lam (E.PVar n) (transLambda t e)
             [] -> e
 
-translateLetLVI :: LetLVI -> TransRes Name
-translateLetLVI (LetLVI lvi) = pure $ translateLambdaVI lvi
+translateLetLVI :: LetLVI -> Name
+translateLetLVI (LetLVI lvi) = translateLambdaVI lvi
 
 translateLambdaVI :: LambdaVI -> Name
 translateLambdaVI (LambdaVId (VIdent n)) = n
 translateLambdaVI WildVId = "_"
 
-translatePattern :: Pattern -> TransRes E.Pattern
-translatePattern (PId (VIdent n)) = pure $ E.PVar n
-translatePattern (PInt i) = pure . E.PConst $ LInt i
-translatePattern PTrue = pure . E.PConst $ LBool True
-translatePattern PFalse = pure . E.PConst $ LBool False
-translatePattern PWildcard = pure . E.PVar $ "_"
-translatePattern PListEmpty = pure . E.PConst $ LNil
-translatePattern (PList plist) = do
-    tlist <- mapM translatePattern plist
-    pure . trans $ tlist
+translatePattern :: Pattern -> E.Pattern
+translatePattern (PId (VIdent n)) = E.PVar n
+translatePattern (PInt i) = E.PConst $ LInt i
+translatePattern PTrue = E.PConst $ LBool True
+translatePattern PFalse = E.PConst $ LBool False
+translatePattern PWildcard = E.PVar "_"
+translatePattern PListEmpty = E.PConst LNil
+translatePattern (PList plist) = trans $ map translatePattern plist
     where 
         trans l = case l of
             h:t -> E.PCons h (trans t)
             []  -> E.PConst E.LNil
-translatePattern (PListCons p1 p2) = do
-    tp1 <- translatePattern p1
-    tp2 <- translatePattern p2
-    pure $ E.PCons tp1 tp2
+translatePattern (PListCons p1 p2) = E.PCons tp1 tp2
+    where
+        tp1 = translatePattern p1
+        tp2 = translatePattern p2 
 
-translateMatching :: Matching -> TransRes (E.Pattern, E.Expr)
-translateMatching (MatchCase p expr) = do
-    tp <- translatePattern p
-    te <- translateExpr expr
-    pure (tp, te)
+translateMatching :: Matching -> (E.Pattern, E.Expr)
+translateMatching (MatchCase p expr) = (tp, te)
+    where
+        tp = translatePattern p
+        te = translateExpr expr
