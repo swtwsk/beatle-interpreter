@@ -1,0 +1,31 @@
+# Ignore all
+*
+
+# Unignore all with extensions and dirs
+!*.*
+!*/
+
+# Ignore Haskell object files
+*.hi
+*.o
+*.bak
+
+# Unignore Makefile
+!Makefile
+
+# Unignore LICENSE
+!LICENSE
+
+# Ignore OSX specific files
+.DS_Store
+
+# Ignore BNFC folder
+bnfc/
+!bnfc/*.cf
+
+# Ignore idea
+.idea/
+.stack-work/
+
+# Ignore vscode
+.vscode/
