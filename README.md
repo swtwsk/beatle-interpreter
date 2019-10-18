@@ -1,40 +1,72 @@
-## Andrzej Swatowski - Beatle
+## Beatle -- functional language interpreter
 
-Beatle jest językiem funkcyjnym, inspirowanym głównie składnią i działaniem OCamla, jak i częściowo Haskellem.
+Beatle is a functional language with syntax and semantics inspired mostly by OCaml, but by Haskell as well. Its interpreter is written in Haskell.
 
-W porównaniu do deklaracji języka z kwietnia pozwoliłem sobie wprowadzić kilka zmian, związanych głównie z niezaimplementowanymi funkcjonalnościami. Nie udało mi się zaimplementować rekurencyjnych typów algebraicznych, z tego też powodu z gramatyki wypadły patterny związane z typami algebraicznymi, konstruktory ADT (postaci `TIdent "of" "(" [Expr] ")"` oraz definicja typu jako fraza (instrukcja). Prócz tego postanowiłem usunąć możliwość umieszczania patternów jako argumenty funkcji (konstrukcja `let f 3 = 4`), koncentrując się na pattern matchingu zbudowanym wokół konstrukcji `match x with { case _ -> _ }`. Zaimplementowałem za to inferencję typów Hindleya-Milnera, ale biorąc pod uwagę brak ADT postanowiłem wyrzucić z gramatyki też adnotacje typów (nie da się teraz zrobić `let f (x : Int) -> Int = x`).
+## Acknowledgements
 
-### Projekt
-#### Uruchomienie
-Projekt jest projektem Stackowym, aby go uruchomić należy użyć komend `stack build` oraz `stack run`.
+The interpreter was written as a assignment on "Programming Languages and Paradigms" course on MIMUW (University of Warsaw -- Faculty of Mathematics, Informatics and Mechanics).
 
-Uruchomienie projektu bez argumentów linii poleceń skutkuje pojawieniem się REPLa wykorzystującego Haskeline. W tym trybie nie da się pisać wielolinijkowych fraz, wszystkie muszą zmieścić się w jednej linii.
-Argumenty linii poleceń traktowane są jako nazwy kolejnych plików do zinterpretowania - wywołanie `stack run plik.bt` wczyta zawartość pliku `plik.bt` i zinterpretuje ją, wypisując wyniki na standardowe wyjście (a błędy na stderr).
+[Stephen Diehl blog](http://dev.stephendiehl.com/fun/) was a tremendous help when working on this task. I also read first chapters of Simon Peyton Jones book called ["The Implementation of Functional Programming Languages"](https://www.microsoft.com/en-us/research/publication/the-implementation-of-functional-programming-languages/) to understand ideas standing behind implementations.
+When working on type inference I used Martin Grabmüller paper on [*W* algorithm implementation](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.65.7733&rep=rep1&type=pdf) and [So You Still Don't Understand Hindley-Milner blog series](https://legacy-blog.akgupta.ca/blog/2013/05/14/so-you-still-dont-understand-hindley-milner/) to understand HM type system.
 
-#### Struktura 
-W folderze `app` znajduje się plik `Main.hs`, który jest właściwym entrypointem programu.
+## Getting started
+### Usage
+The project uses [Stack build tool](https://www.haskellstack.org) to compile and manage dependencies.
 
-W folderze `src` znajduje się kod interpretera, podzielony na pliki:
- - `AbsBeatle.hs`, `ErrM.hs`, `LayoutBeatle.hs`, `LexBeatle.hs`, `ParBeatle.hs` oraz `PrintBeatle.hs` są plikami automatycznie wygenerowanymi przez BNFC, z którego korzystałem. Gramatyka wprowadzona do BNFC znajduje się w pliku `Beatle.cf`,
- - `Expr.hs` zawiera definicje typów algebraicznych oznaczających odpowiednio wyrażenia do interpretacji *Expr* oraz typy *Type*,
- - `Values.hs` zawiera definicje typu algebraicznego *Value*, który jest rzeczywistym wynikiem ewaluacji danego wyrażenia,
- - `Errors.hs` zawiera definicje różnorakich błędów,
- - `TypeInference.hs` zawiera kod inferencji typów,
- - `Lambda.hs` odpowiada za ewaluację drzewa AST złożonego z *Expr*,
- - `Interpreter.hs` odczytuje przetworzone przez parser drzewo AST i tworzy z niego mniejsze drzewo *Expr*, które następnie przekazuje do `TypeInference.hs` oraz `Lambda.hs`.
+Running the interpreter:
+```bash
+stack build
+stack run
+```
 
-### Ewaluacja
-Core algorytmu ewaluacji oparty jest o "mini-interpreter języka funkcyjnego", który pojawił się na wykładzie. Zmodyfikowana wersja rozpoznaje rozszerzony rachunek lambda (rozszerzony o let/letrec, listy oraz pattern matching). Cały algorytm umieszczony jest w `Lambda.hs`.
+If no command line arguments are provided, interpreter runs as REPL (using [Haskeline](http://hackage.haskell.org/package/haskeline)). In this mode, you cannot write multi-line commands.
+Command line arguments are considered as names of files to interpret -- for example, calling `stack run file.bt` loads content of `file.bt`, interprets it and write results to standard output.
 
-### Inferencja typów
-Inferencja typów oparta jest o sławny algorytm W, a część implementacji o zalinkowaną na Moodle'u pracę.
-Inferencja funkcji wzajemnie rekurencyjnych jest możliwa, ale tylko w przypadku, gdy funkcje te mają te same typy (czyli na przykład klasyczne funkcje wzajemnie rekurencyjne `even` oraz `odd`). Do wnioskowania o rekurencji zastosowałem sztuczkę z otypowaniem kombinatora Y (*forall x. (x -> x) -> x*), a później rozszerzyłem to do większego kombinatora (*forall x. ([x] -> x) -> x*).
+### Example code
+```ocaml
+λ 1 + 1;;
+- : Int = 2
+λ let x = 4 * 4;;
+x : Int = 16
+λ x + 4;;
+- : Int = 20
+20
+λ letrec map f l = match l with { case h::t -> (f h) :: (map f t); case [] -> [] };;
+map : ('m -> 'n) -> (['m] -> ['n]) = <fun>
+λ let compose f g = \x -> f (g x);;
+compose : ('e -> 'd) -> (('c -> 'e) -> ('c -> 'd)) = <fun>
+λ let fs = [\x -> x + 1, \x -> x - 1];;
+fs : [Int -> Int] = [<fun>, <fun>]
+λ let nfs = map (compose (\x -> x == 0)) fs;;
+nfs : [Int -> Bool] = [<fun>, <fun>]
+λ map (\f -> f 1) nfs;;
+- : [Bool] = [False, True]
+```
+More code examples can be found in `good` folder.
 
-### Wykorzystane monady
-Interpreter korzysta z monad State, Except, Input oraz IO, razem tworzących stos monad transformerów postaci **ExceptT  InterpreterError (StateT  Env (InputT  IO))**. State oraz Except odpowiadają odpowiednio za trzymanie map nazw na odpowiednie wartości (w tym domknięcia) oraz obsługę błędów.
-ExceptT jest najbardziej zewnętrznym, ponieważ chciałem utrzymywać ciągłość stanu w REPLu nawet mimo ewentualnych błędów wykonania/typowania.
-InputT jest transformerem wykorzystywanym przez Haskeline.
+## Project structure
+`Main.hs` in `app` folder is an appropriate entrypoint of the interpreter program.
 
-Ewaluator (`Lambda.hs`) używa za to Excepta obudowanego w Readera - **ReaderT  Env (Except  InterpreterError) Value**.
+In the `src` folder you may find code of the interpreter, split into files:
+- `AbsBeatle.hs`, `ErrM.hs`, `LayoutBeatle.hs`, `LexBeatle.hs`, `ParBeatle.hs` and `PrintBeatle.hs` have been automatically generated by [BNFC](https://bnfc.digitalgrammars.com). Grammar used by it is in `Beatle.cf` file,
+ - `Expr.hs` contains definitions of algebraic data types  zawiera definicje typów algebraicznych denoting expressions *Expr* and types *Type*,
+ - `Values.hs` contains the definition of ADT *Value*, enclosing result of evaluation,
+ - `Errors.hs` contains definitions of various errors,
+ - `TypeInference.hs` contains code of type inference algorithm,
+ - `Lambda.hs` is responsible for evaluation of AST made from *Expr*,
+ - `Interpreter.hs` transforms AST processed by parser into smaller *Expr* tree, which is then used by both `TypeInference.hs` and `Lambda.hs`.
 
-Inferencja typów korzysta ponownie ze State i Except, tylko, że odwrotnie (tak jak ewaluator) - **StateT  TcState (Except  InterpreterError)**, gdzie TcState służy za kontener na aktywną zmienną typową.
+### Type inference
+
+Type inference is based on M. Grabmüller implementation of the famous [*W* algorithm](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.65.7733&rep=rep1&type=pdf).
+For now, inference of mutually recursive functions is possible only if those functions have the same types (so, for example, classic `even` and `odd` functions). Recursion inference uses the trick of typing the Y combinator (*forall x. (x -> x) -> x*) and then expand it to type "bigger" combinator (*forall x. ([x] -> x) -> x*).
+
+### Used monads
+
+Interpreter uses State, Except, Input and IO monads, together creating stack of monad transformers -- **ExceptT  InterpreterError (StateT  Env (InputT  IO))**. State and Except are responsible for keeping map of names and values connected with them (including closures) and error handling.
+ExceptT is the most external transformer, because I wanted to keep  continuity of the state of REPL in case of any evaluation or typing errors.
+InputT is used by Haskeline.
+
+Evaluator (`Lambda.hs`) uses Except enclosed by ReaderT -- **ReaderT  Env (Except  InterpreterError) Value**.
+
+Type inference uses State and Except monads -- **StateT  TcState (Except  InterpreterError)**. TcState is a container for current type variable.
