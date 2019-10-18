@@ -1,12 +1,13 @@
-## Beatle -- functional language interpreter
+## Beatle - functional language interpreter
 
 Beatle is a functional language with syntax and semantics inspired mostly by OCaml, but by Haskell as well. Its interpreter is written in Haskell.
 
 ## Acknowledgements
 
-The interpreter was written as a assignment on "Programming Languages and Paradigms" course on MIMUW (University of Warsaw -- Faculty of Mathematics, Informatics and Mechanics).
+The interpreter was written as a assignment on "Programming Languages and Paradigms" course on MIMUW (University of Warsaw - Faculty of Mathematics, Informatics and Mechanics).
 
 [Stephen Diehl blog](http://dev.stephendiehl.com/fun/) was a tremendous help when working on this task. I also read first chapters of Simon Peyton Jones book called ["The Implementation of Functional Programming Languages"](https://www.microsoft.com/en-us/research/publication/the-implementation-of-functional-programming-languages/) to understand ideas standing behind implementations.
+
 When working on type inference I used Martin Grabmüller paper on [*W* algorithm implementation](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.65.7733&rep=rep1&type=pdf) and [So You Still Don't Understand Hindley-Milner blog series](https://legacy-blog.akgupta.ca/blog/2013/05/14/so-you-still-dont-understand-hindley-milner/) to understand HM type system.
 
 ## Getting started
@@ -20,6 +21,7 @@ stack run
 ```
 
 If no command line arguments are provided, interpreter runs as REPL (using [Haskeline](http://hackage.haskell.org/package/haskeline)). In this mode, you cannot write multi-line commands.
+
 Command line arguments are considered as names of files to interpret -- for example, calling `stack run file.bt` loads content of `file.bt`, interprets it and write results to standard output.
 
 ### Example code
@@ -59,12 +61,15 @@ In the `src` folder you may find code of the interpreter, split into files:
 ### Type inference
 
 Type inference is based on M. Grabmüller implementation of the famous [*W* algorithm](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.65.7733&rep=rep1&type=pdf).
+
 For now, inference of mutually recursive functions is possible only if those functions have the same types (so, for example, classic `even` and `odd` functions). Recursion inference uses the trick of typing the Y combinator (*forall x. (x -> x) -> x*) and then expand it to type "bigger" combinator (*forall x. ([x] -> x) -> x*).
 
 ### Used monads
 
 Interpreter uses State, Except, Input and IO monads, together creating stack of monad transformers -- **ExceptT  InterpreterError (StateT  Env (InputT  IO))**. State and Except are responsible for keeping map of names and values connected with them (including closures) and error handling.
+
 ExceptT is the most external transformer, because I wanted to keep  continuity of the state of REPL in case of any evaluation or typing errors.
+
 InputT is used by Haskeline.
 
 Evaluator (`Lambda.hs`) uses Except enclosed by ReaderT -- **ReaderT  Env (Except  InterpreterError) Value**.
